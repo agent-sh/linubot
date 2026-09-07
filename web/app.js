@@ -185,7 +185,7 @@ async function deleteBot(name) {
   try {
     const affected = await api(`/api/bots/${enc(name)}/deletion`);
     const changes = [affected.groups.length ? `Removes this bot from ${affected.groups.length} group(s).` : "", affected.routines.length ? `Deletes ${affected.routines.length} affected routine(s).` : "", affected.emptyGroups.length ? "Empty groups are removed." : ""].filter(Boolean).join(" ");
-    confirmAction(`Delete ${name}?`, `Deletes this bot’s profile and instructions. ${changes} Past messages and shared team memory are kept.`, async (confirmation) => {
+    confirmAction(`Delete ${name}?`, `Deletes this bot’s profile, instructions and saved website logins. ${changes} Past messages and shared team memory are kept.`, async (confirmation) => {
       await api(`/api/bots/${enc(name)}`, { method: "DELETE", body: { detachReferences: true } });
       changed();
       if (confirmation.alive()) { confirmation.close(); navigate("home"); }
@@ -246,7 +246,7 @@ function createGroup() {
 }
 function manageGroup(group) {
   const modal = dialog(group.name, `<p class="dialog-intro">Members share this conversation. Queue tasks to keep the current work, or explicitly redirect the group.</p><ul class="plain-list">${group.members.map((name) => `<li><a class="button subtle" href="#/bot/${enc(name)}">${avatar(name)} ${esc(name)} ${icon("arrow")}</a></li>`).join("")}</ul><div class="form-actions"><button type="button" class="danger" data-delete>Delete group</button></div>`);
-  modal.root.querySelector("[data-delete]").onclick = () => confirmAction(`Delete ${group.name}?`, "This removes the group. The individual teammates remain in your roster.", async (confirmation) => { await api(`/api/groups/${enc(group.id)}`, { method: "DELETE" }); changed(); if (confirmation.alive()) { confirmation.close(); navigate("home"); } }, { label: "Delete group", danger: true });
+  modal.root.querySelector("[data-delete]").onclick = () => confirmAction(`Delete ${group.name}?`, "This removes the group and its saved website logins. The individual teammates remain in your roster.", async (confirmation) => { await api(`/api/groups/${enc(group.id)}`, { method: "DELETE" }); changed(); if (confirmation.alive()) { confirmation.close(); navigate("home"); } }, { label: "Delete group", danger: true });
 }
 
 initUI();

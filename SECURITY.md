@@ -62,6 +62,12 @@ future saved context; it does not remove the same text from existing session
 archives. Compaction preserves those archives. Do not attach a complete data
 directory to an issue or publish it as a test fixture.
 
+Browser profiles contain website sessions and are retained per bot or group
+under the private data directory. Approving a later computer task lets that
+teammate use its existing signed-in sessions. Deleting the bot or group removes
+those profiles once its computer is stopped. Personal desktop Chrome profiles
+are separate. Sites can still expire or revoke sessions.
+
 ## Extensions and imports
 
 Remote skill previews pin source revisions and bound their contents. Skills

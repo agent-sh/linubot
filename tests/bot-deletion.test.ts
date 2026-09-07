@@ -1,12 +1,13 @@
+import { browserProfile } from "../src/computer/profiles.ts";
 import { it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createBot, deleteBot, botDeletionPreview, getBot } from "../src/bots/manager.ts";
 import { appendEvent } from "../src/events/log.ts";
 import { setProvider } from "../src/auth/store.ts";
-import { createGroup } from "../src/chat/session.ts";
+import { createGroup, deleteGroup } from "../src/chat/session.ts";
 import { createApp } from "../src/server.ts";
 
 let directory: string;
@@ -70,4 +71,20 @@ it("protects destinations of active routines even when another bot does the work
     finish(); const result = await running; assert.equal(result.status, 200); await result.body?.cancel();
     assert.match(readFileSync(join(directory, "feed-bot_Destination.jsonl"), "utf8"), /Delivered fixture/);
   } finally { finish(); await app.close(); }
+});
+
+it("preserves live browser profiles on deletion and removes only the deleted owner once idle", async () => {
+  createBot("Remove"); createBot("Keep"); writeFileSync(join(directory, "groups.json"), JSON.stringify([{ id: "last", members: ["Remove"] }]));
+  const bot = browserProfile("bot:Remove", "standard"), group = browserProfile("group:last", "standard"), keep = browserProfile("bot:Keep", "standard");
+  for (const path of [bot, group, keep]) writeFileSync(join(path, "fixture"), "saved-login");
+  for (const scope of ["bot:Remove", "group:last"]) {
+    writeFileSync(join(directory, "computer-workspaces.json"), JSON.stringify([{ scope, state: "running" }]));
+    assert.throws(() => deleteBot("Remove", { detachReferences: true }), /Close this bot or group/);
+    assert.ok(getBot("Remove")); assert.equal(existsSync(bot), true); assert.equal(existsSync(group), true);
+    assert.deepEqual(JSON.parse(readFileSync(join(directory, "groups.json"), "utf8"))[0].members, ["Remove"]);
+  }
+  assert.throws(() => deleteGroup("last"), /Close this bot or group/);
+  writeFileSync(join(directory, "computer-workspaces.json"), "[]");
+  deleteBot("Remove", { detachReferences: true });
+  assert.equal(existsSync(bot), false); assert.equal(existsSync(group), false); assert.equal(existsSync(keep), true);
 });

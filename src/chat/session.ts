@@ -1,3 +1,4 @@
+import { forgetBrowserProfiles } from "../computer/profiles.ts";
 import { join } from "node:path";
 import { dataDir, readJson, writeJson } from "../store.ts";
 import { ensureBot, getBot, validName } from "../bots/manager.ts";
@@ -54,6 +55,7 @@ export function deleteGroup(id: string): boolean {
   const jobs = readJson<Array<{ name: string; deliver?: string }>>(join(dataDir(), "jobs.json"), []);
   const references = jobs.filter((job) => typeof job?.deliver === "string" && job.deliver.trim() === `group:${id}`);
   if (references.length) throw new InputError(`group is referenced by jobs: ${references.map((job) => job.name).join(", ")}`, 409);
+  forgetBrowserProfiles(`group:${id}`);
   writeJson(groupsPath(), listGroups().filter((group) => group.id !== id));
   return true;
 }

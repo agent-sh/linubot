@@ -4,6 +4,23 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.8.0
+
+Checked on 2026-09-07: 307 source tests and six desktop scenarios passed
+from source and the packaged executable.
+
+Real Chrome testing confirms that session cookies survive desktop teardown and
+a fresh adapter, for both regular and automated browser profiles. Another bot
+starts with separate cookies. Profile deletion is blocked while an owned
+computer is running; graceful browser-quit failure still reaches desktop
+teardown. Google account acceptance remains unverified.
+
+Bulk import tests cover one combined snapshot, overlapping group membership,
+receipt retries and rollback after a later item fails. Continuation tests retain
+the original brief, criteria and archived progress after restart. Desktop QA
+covers Select all/Clear selection and continuing an old 30-step failure without
+replacing a draft.
+
 ## Release acceptance: 2.7.2
 
 Checked on 2026-09-07: 299 source tests and five desktop scenarios passed

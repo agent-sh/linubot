@@ -23,6 +23,9 @@ export interface RunRecord {
   contextRevision?: string;
   response?: string;
   error?: string;
+  resumedFrom?: string;
+  userAuthored?: boolean;
+  continuationBatchId?: string;
   toolCalls: number;
   usage?: { input: number; output: number };
   messageSeq?: number;
@@ -169,6 +172,9 @@ function validateRun(input: RunRecord): RunRecord {
   if (input.response !== undefined) run.response = boundedText(input.response, "Response", MAX_RESPONSE);
   if (input.error !== undefined) run.error = boundedText(input.error, "Error", 20_000);
   if (input.messageSeq !== undefined) run.messageSeq = nonnegative(input.messageSeq, "Message sequence", true);
+  if (input.userAuthored !== undefined) { if (typeof input.userAuthored !== "boolean") throw new InputError("Invalid task authorship"); run.userAuthored = input.userAuthored; }
+  if (input.resumedFrom !== undefined) run.resumedFrom = safeId(input.resumedFrom);
+  if (input.continuationBatchId !== undefined) run.continuationBatchId = safeId(input.continuationBatchId);
   if (input.batchId !== undefined) run.batchId = requiredText(input.batchId, "Batch id", 200);
   if (input.usage !== undefined) {
     if (!input.usage) throw new InputError("Invalid usage");
