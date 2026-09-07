@@ -4,6 +4,26 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.6.1
+
+Checked on 2026-09-07:
+
+- 272 source tests and three desktop scenarios passed, including the packaged
+  executable installed from the public release.
+- The public wget installer built and staged the tagged source. The curl path
+  resolved the latest stable release successfully.
+- A real managed upgrade from 2.6.0 to 2.6.1 blocked active work, installed the
+  checked release, restarted and preserved a fixture bot and its conversation.
+- A real ChatGPT request and the workspace browser smoke test passed. Google
+  OAuth exchange and cancellation are fixture-tested; live access still requires
+  the account and client setup described in the provider guide.
+- Source/history secret scans and package build-path checks passed. The tar and
+  Debian payloads matched the checked unpacked application. Required ELF symbols
+  set the glibc minimum to 2.39; packaged behavior was tested on Ubuntu 26.04.
+
+Raw trials stay outside the public source because they can contain local paths,
+credentials or provider output.
+
 ## Local checks
 
 ```sh

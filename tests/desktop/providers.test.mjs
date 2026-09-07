@@ -21,7 +21,7 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  const env = { ...process.env, LINUBOT_UPDATE_CHECK: '0', XDG_CONFIG_HOME: join(directory, 'config'), LINUBOT_DATA: join(directory, 'store'), LINUBOT_DESKTOP_PROFILE: join(directory, 'desktop'), LINUBOT_BASE_URL: `${base}/v1`, LINUBOT_API_KEY: 'fixture-key', LINUBOT_MODEL: 'fixture-a', LINUBOT_PROVIDER: 'openai-compat' };
+  const env = { ...process.env, WAYLAND_DISPLAY: '', XDG_SESSION_TYPE: 'x11', LINUBOT_UPDATE_CHECK: '0', XDG_CONFIG_HOME: join(directory, 'config'), LINUBOT_DATA: join(directory, 'store'), LINUBOT_DESKTOP_PROFILE: join(directory, 'desktop'), LINUBOT_BASE_URL: `${base}/v1`, LINUBOT_API_KEY: 'fixture-key', LINUBOT_MODEL: 'fixture-a', LINUBOT_PROVIDER: 'openai-compat' };
   mkdirSync(join(directory, 'config/muse'), { recursive: true });
   writeFileSync(join(directory, 'config/muse/auth.json'), JSON.stringify({ providers: { meta: { api_base_url: 'https://api.meta.ai/v1', api_key: 'LLM|fixture|fake-muse-key', access_token: 'never-import-this-account-token' } } }));
   writeFileSync(join(directory, 'config/muse/settings.json'), JSON.stringify({ model: 'muse-spark-1.3-contributor' }));

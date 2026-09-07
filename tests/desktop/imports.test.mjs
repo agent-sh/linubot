@@ -30,7 +30,7 @@ test('imports Hermes context and a Grok group into working Linubot conversations
     response.end(JSON.stringify({ choices: [{ message: { content } }] }));
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const env = { ...process.env, LINUBOT_UPDATE_CHECK: '0', LINUBOT_DATA: join(directory, 'store'), LINUBOT_DESKTOP_PROFILE: join(directory, 'desktop'), LINUBOT_IMPORT_HERMES: hermes, LINUBOT_IMPORT_GROK: grok, LINUBOT_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`, LINUBOT_API_KEY: 'fixture-key', LINUBOT_MODEL: 'fixture-model', LINUBOT_PROVIDER: 'openai-compat' }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, WAYLAND_DISPLAY: '', XDG_SESSION_TYPE: 'x11', LINUBOT_UPDATE_CHECK: '0', LINUBOT_DATA: join(directory, 'store'), LINUBOT_DESKTOP_PROFILE: join(directory, 'desktop'), LINUBOT_IMPORT_HERMES: hermes, LINUBOT_IMPORT_GROK: grok, LINUBOT_BASE_URL: `http://127.0.0.1:${server.address().port}/v1`, LINUBOT_API_KEY: 'fixture-key', LINUBOT_MODEL: 'fixture-model', LINUBOT_PROVIDER: 'openai-compat' }; delete env.ELECTRON_RUN_AS_NODE;
   let app;
   try {
     app = await electron.launch({ args: [resolve('desktop/main.cjs')], env, ...(process.env.LINUBOT_TEST_EXECUTABLE ? { executablePath: process.env.LINUBOT_TEST_EXECUTABLE, args: [] } : {}) });

@@ -19,7 +19,7 @@ test('bots and sessions lead the desktop; feedback and tuning stay optional', as
     res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify({ choices: [{ message, finish_reason: message.tool_calls ? 'tool_calls' : 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 10 } }));
   });
   await new Promise((resolve) => provider.listen(0, '127.0.0.1', resolve));
-  const env = { ...process.env, LINUBOT_UPDATE_CHECK: '0', LINUBOT_DATA: join(data, 'store'), LINUBOT_DESKTOP_PROFILE: join(data, 'profile'), LINUBOT_BASE_URL: `http://127.0.0.1:${provider.address().port}`, LINUBOT_API_KEY: 'fixture-key', LINUBOT_MODEL: 'fixture-model', LINUBOT_PROVIDER: 'openai-compat' };
+  const env = { ...process.env, WAYLAND_DISPLAY: '', XDG_SESSION_TYPE: 'x11', LINUBOT_UPDATE_CHECK: '0', LINUBOT_DATA: join(data, 'store'), LINUBOT_DESKTOP_PROFILE: join(data, 'profile'), LINUBOT_BASE_URL: `http://127.0.0.1:${provider.address().port}`, LINUBOT_API_KEY: 'fixture-key', LINUBOT_MODEL: 'fixture-model', LINUBOT_PROVIDER: 'openai-compat' };
   delete env.ELECTRON_RUN_AS_NODE;
   const options = { args: [resolve('desktop/main.cjs')], env, ...(process.env.LINUBOT_TEST_EXECUTABLE ? { executablePath: process.env.LINUBOT_TEST_EXECUTABLE, args: [] } : {}) };
   let app, page;
