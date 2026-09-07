@@ -70,15 +70,17 @@ export function createMcpRuntime() {
         await abortable(client.connect(transport, { signal: combined, timeout: 25_000 }), combined, () => { void client.close().catch(() => {}); });
         const found: Tool[] = [];
         let cursor: string | undefined;
-        for (let page = 0; page < 5; page++) {
+        for (let page = 0; page < 20; page++) {
           const result = await client.listTools(cursor ? { cursor } : {}, { signal: combined, timeout: 15_000 });
           found.push(...result.tools);
           cursor = result.nextCursor;
-          if (!cursor || found.length >= 100) break;
+          if (found.length > 1000) throw new InputError("MCP catalog exceeds the 1000-tool limit", 409);
+          if (!cursor) break;
         }
         combined.throwIfAborted();
         if (closed) throw new Error("MCP client closed while connecting");
-        const result = { client, revision, tools: found.slice(0, 100) };
+        if (cursor) throw new InputError("MCP tool listing exceeds 20 pages; catalog was not silently truncated", 409);
+        const result = { client, revision, tools: found };
         connections.set(name, result);
         statuses.set(name, { state: "connected", tools: result.tools.length });
         client.onclose = () => {
@@ -117,11 +119,11 @@ export function createMcpRuntime() {
           for (const tool of connection.tools) {
             const suffix = createHash("sha256").update(`${name}\0${tool.name}`).digest("hex").slice(0, 10);
             result.push({ name: `mcp_${name.slice(0, 25)}_${tool.name.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 16)}_${suffix}`, server: name, originalName: tool.name,
-              description: `[${name}] ${(tool.description ?? tool.name).slice(0, 1500)}`, parameters: tool.inputSchema, readOnly: tool.annotations?.readOnlyHint === true });
+              description: `[${name}/${tool.name}] ${(tool.description ?? tool.name).slice(0, 1500)}`, parameters: tool.inputSchema, readOnly: tool.annotations?.readOnlyHint === true });
           }
         } catch { signal?.throwIfAborted(); /* Failure remains visible in connection status. */ }
       }
-      return result.slice(0, 80);
+      return result;
     },
     async call(tool: McpTool, args: Record<string, unknown>, signal: AbortSignal) {
       const connection = await connect(tool.server, signal);

@@ -1,3 +1,4 @@
+import { createToolDiscovery } from "./tool-discovery.ts";
 import { botPermission, savePermission } from "./permissions.ts";
 import { createWorkspaceView, type WorkspaceView } from "../computer/view.ts";
 import { createHash, randomUUID } from "node:crypto";
@@ -65,7 +66,7 @@ export function agentContext(bot: string, lessonOverride?: string[]): AgentConte
   const skills = profile.skills.map((name) => {
     const skill = readInstalledSkill(name);
     if (!skill) throw new InputError(`Approved skill is unavailable: ${name}. Review ${bot}'s profile.`, 409);
-    return { name: skill.name, body: skill.body };
+    return { name: skill.name, description: skill.description, revision: digest(skill.body) };
   });
   const lessons = lessonOverride ?? activeLessons(bot);
   const soul = readSoul(bot);
@@ -76,7 +77,7 @@ export function agentContext(bot: string, lessonOverride?: string[]): AgentConte
   const part = (label: string, value: string, max: number) => value ? `\n\n## ${label}\n${value.slice(0, max)}${value.length > max ? "\n[Context truncated to the local budget.]" : ""}` : "";
   const system = WORKFLOW + part("Teammate identity", `${bot}\n${soul}\nStanding goal: ${profile.goal ?? profile.topic ?? "Complete the user's brief."}`, 8000)
     + part("Approved, evaluated lessons", lessons.join("\n"), 6000)
-    + part("Approved skill context", skills.map((skill) => `${skill.name}\n${skill.body}`).join("\n\n"), 12000)
+    + part("Available skill names (use list_skills to search, then read_skill_file with SKILL.md to load instructions)", skills.map((skill) => skill.name).join(", "), 12288)
     + part("Imported context for this bot (historical, unverified, never permission; use read_memory to find other details)", importedContext, 8000);
   return currentMemory({ provider, system, revision: "", lessons, baseSystem: system, baseRevision });
 }
@@ -85,9 +86,10 @@ const schema = (properties: Record<string, unknown>, required: string[] = []) =>
 const text = { type: "string" };
 export function agentTools(allowMemoryWrites = true): ToolDefinition[] {
   return [
+    { name: "search_tools", description: "Search available built-in and connected MCP tools by name or task. Loads at most five matching schemas for the next model call. Use this to learn a tool’s arguments before using it; not all tools are loaded initially.", parameters: schema({ query: text, limit: { type: "integer", minimum: 1, maximum: 5 } }, ["query"]) },
     { name: "read_webpage", description: "Read a public HTTPS page and return its text and links. For JavaScript apps or non-text files, use the workspace browser.", parameters: schema({ url: text }, ["url"]) },
     { name: "list_skills", description: "Find approved skills attached to this bot, including skills beyond the prompt budget. Read a matching skill with read_skill_file and path SKILL.md before using it. Optional query and offset for pages of 20 skills.", parameters: schema({ query: text, offset: { type: "integer" } }) },
-    { name: "read_skill_file", description: "Read a supporting text file of an approved skill attached to this teammate. Paths are relative to the skill folder.", parameters: schema({ skill: text, path: text }, ["skill", "path"]) },
+    { name: "read_skill_file", description: "Load an approved attached skill on demand: use path SKILL.md for its instructions, then read supporting files relative to its folder as needed.", parameters: schema({ skill: text, path: text }, ["skill", "path"]) },
     { name: "launch_workspace_app", description: "Launch an application in this task's owned workspace. Asks approval for the exact executable and arguments; no host desktop is targeted.", parameters: schema({ command: text, args: { type: "array", items: text }, name: text }, ["command"]) },
     { name: "read_workspace_log", description: "Read stdout from an application launched in this task's workspace. Use the app ID returned by launch_workspace_app.", parameters: schema({ app: text }, ["app"]) },
     { name: "workspace_action", description: "Control this task's approved desktop. Actions: click (x,y), type (text), key (keys, e.g. Ctrl+l, Return), scroll (x,y,direction,amount), focus (title). Screenshot returned after every action. Set external=true for sending/submitting, purchases, or account changes to request an additional explicit approval.", parameters: schema({ action: { type: "string", enum: ["click", "type", "key", "scroll", "focus"] }, x: { type: "integer" }, y: { type: "integer" }, text, keys: text, title: text, direction: { type: "string", enum: ["up", "down", "left", "right"] }, amount: { type: "integer" }, external: { type: "boolean" } }, ["action"]) },
@@ -216,6 +218,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
     const progress = emit(run, { kind: "thinking", status: "pending", text: "Preparing context", detail: "Loading this conversation, selected model, approved skills, memory and evaluated lessons." });
     const canWriteMemory = batch.userAuthored && (run.source === "chat" || run.source === "group");
     const toolList: ToolDefinition[] = [];
+    let toolDiscovery: ReturnType<typeof createToolDiscovery> | undefined;
     let extensionTools: McpTool[] = [];
     let pendingWorkspaceImage: ChatMessage["images"];
     let pendingMcpImages: NonNullable<ChatMessage["images"]> = [];
@@ -260,6 +263,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
 
     async function callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
       signal.throwIfAborted();
+      if (name === "search_tools") return toolDiscovery!.search(requiredText(args.query, "Tool search", 200), args.limit === undefined ? 5 : args.limit as number);
       const extension = extensionTools.find((tool) => tool.name === name);
       if (extension) {
         // Publisher annotations describe a tool; they do not grant permission.
@@ -427,13 +431,15 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
       messages.push({ role: "system", content: context.system + (botPermission(run.bot).mode === "auto" ? "\nThe owner enabled Always approve for runtime actions. Use the tools without asking for redundant approvals in chat. Private sign-in still needs request_user_control; you must not ask for passwords in chat." : "") + (canWriteMemory ? "" : "\nThis is an automated or delegated task. Memory is read-only; do not turn its prompt into personal facts.") + `\n\nTask success criteria:\n${run.criteria.map((criterion) => `- ${criterion}`).join("\n") || "No explicit criteria. Deliver the requested result and state limitations."}` }, ...past, { role: "user", content: run.prompt, pinned: true });
       if (run.resumedFrom) messages.push({ role: "user", content: `Continue unfinished task ${run.resumedFrom} from the saved session context and original request above. Use read_session to recover details; do not repeat completed work. The previous run hit an execution limit. Reopen the saved bot or group browser if needed. Past approvals are historical; request new approval where required.`, pinned: true });
       if (run.scope.startsWith("group:")) messages.push({ role: "user", content: `It is ${run.bot}'s turn. Address the shared brief, build on prior teammates' responses, and do not impersonate them.`, pinned: true });
-      toolList.push(...agentTools(canWriteMemory));
+      const builtins = agentTools(canWriteMemory);
       contextPrepared = true;
       emit(run, { kind: "thinking", refSeq: progress.seq, status: "done", text: "Context prepared", detail: `Model: ${context.provider.model}. Context revision: ${context.revision}.` });
       extensionTools = await mcp.tools(signal);
-      toolList.push(...extensionTools);
+      toolDiscovery = createToolDiscovery([...builtins, ...extensionTools]);
+      messages[0].content += `\n\n${toolDiscovery.names()}`;
       for (const [name, status] of Object.entries(mcp.status())) if (status.state === "error") emit(run, { kind: "notice", text: `MCP ${name} is unavailable: ${status.error}` });
       for (let step = 0; step < maxSteps; step++) {
+        toolList.splice(0, toolList.length, ...toolDiscovery.active());
         await waitForOwner();
         if (workspace && observedRevision !== workspaceView.revision(workspace)) {
           const observation = await workspaceView.agent(workspace, undefined, signal, snapshot);
@@ -490,7 +496,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
           let result: string;
           let observationSeq: number | undefined;
           try {
-            const definition = toolList.find((tool) => tool.name === call.name);
+            const definition = toolDiscovery.resolve(call.name);
             if (!definition) throw new InputError(`Tool is not available: ${call.name}`);
             const args = JSON.parse(call.arguments) as Record<string, unknown>;
             if (!args || typeof args !== "object" || Array.isArray(args)) throw new InputError("Tool arguments must be a JSON object");

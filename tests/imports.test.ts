@@ -73,6 +73,15 @@ describe("agent import conversion", () => {
     assert.ok(result.skills.every(name => readInstalledSkill(name)?.status === "approved"));
   });
 
+  it("preserves all supported memory files instead of clipping the combined context", () => {
+    for (const name of ["MEMORY.md", "USER.md", "memories/MEMORY.md", "memories/USER.md"]) file(join(hermes, name), "x".repeat(48000) + `END_OF_${name}`);
+    const importer = createAgentImports({ hermes, grok }), source = importer.discover().candidates.find(source => source.source === "hermes")!;
+    const preview = importer.preview({ sourceId: source.id, skills: false, history: false });
+    assert.ok(preview.bots[0].memoryBytes > 128 * 1024);
+    const result = importer.commit(preview.id), memory = readBotContext(result.bots[0]);
+    for (const name of ["MEMORY.md", "USER.md", "memories/MEMORY.md", "memories/USER.md"]) assert.ok(memory.includes(`END_OF_${name}`));
+  });
+
   it("can keep imported skills as drafts and refuses unsupported exported folders", () => {
     const importer = createAgentImports({ hermes, grok }); const id = importer.discover().candidates.find(source => source.source === "hermes")!.id;
     const result = importer.commit(importer.preview({ sourceId: id, activateSkills: false }).id);

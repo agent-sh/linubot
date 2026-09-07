@@ -27,6 +27,7 @@ export interface Section {
 
 const COLORS = ["#0f766e", "#1d4ed8", "#b45309", "#be123c", "#4d7c0f", "#0e7490", "#7c3aed", "#374151"];
 const MAX_SOUL_BYTES = 128 * 1024;
+const MAX_IMPORTED_CONTEXT_BYTES = 256 * 1024;
 
 function directory(path: string): boolean {
   const stat = lstatSync(path, { throwIfNoEntry: false });
@@ -280,13 +281,13 @@ export function readSoul(name: string): string {
 }
 
 export function readBotContext(name: string): string {
-  const path = storedFile(join(botDir(name), "imported-context.md"), MAX_SOUL_BYTES);
+  const path = storedFile(join(botDir(name), "imported-context.md"), MAX_IMPORTED_CONTEXT_BYTES);
   try { return readFileSync(path, "utf8"); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return ""; throw error; }
 }
 export function writeBotContext(name: string, value: string): void {
   if (!getBot(name)) throw new InputError("Unknown bot", 404);
-  if (typeof value !== "string" || Buffer.byteLength(value) > MAX_SOUL_BYTES) throw new InputError("Imported context must be at most 128 KiB");
-  const path = storedFile(join(botDir(name), "imported-context.md"), MAX_SOUL_BYTES), temporary = `${path}.${randomUUID()}.tmp`;
+  if (typeof value !== "string" || Buffer.byteLength(value) > MAX_IMPORTED_CONTEXT_BYTES) throw new InputError("Imported context must be at most 256 KiB");
+  const path = storedFile(join(botDir(name), "imported-context.md"), MAX_IMPORTED_CONTEXT_BYTES), temporary = `${path}.${randomUUID()}.tmp`;
   try { writeFileSync(temporary, value, { flag: "wx", mode: 0o600 }); renameSync(temporary, path); } finally { rmSync(temporary, { force: true }); }
 }
 

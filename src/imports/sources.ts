@@ -166,7 +166,7 @@ export function createImportSources(roots: ImportRoots = {}) {
       } catch { throw new InputError("This Hermes history database has an unsupported schema or is busy. Retry without history."); }
       finally { db.close(); }
     }
-    return { candidate: ref, soul, context: notes.join("\n\n").slice(0, 100000), model: text(model.default || config.model, 200), provider: text(model.provider, 200), skills, routines, messages, warnings };
+    return { candidate: ref, soul, context: notes.join("\n\n"), model: text(model.default || config.model, 200), provider: text(model.provider, 200), skills, routines, messages, warnings };
   }
   function load(id: string, options: { history: boolean; skills: boolean; memory: boolean; routines: boolean }): SourceBundle {
     const ref = refs.get(id); if (!ref) throw new InputError("Import source is unavailable. Refresh the source list.", 404);

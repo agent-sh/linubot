@@ -216,7 +216,7 @@ async function editBot(name) {
     const soul = modal.root.querySelector("[data-soul]");
     if (bot.importedContext) {
       const imported = document.createElement("section"); imported.className = "section";
-      imported.innerHTML = `<details><summary>Imported memories and context</summary><p class="field-hint">This context belongs to ${esc(name)}. Edit or clear it here; shared team memory is separate.</p><form><label>Imported context<textarea name="text" rows="12" maxlength="100000">${esc(bot.importedContext)}</textarea></label><div data-feedback hidden></div><div class="form-actions"><button type="submit">Save imported context</button></div></form></details>`;
+      imported.innerHTML = `<details><summary>Imported memories and context</summary><p class="field-hint">This context belongs to ${esc(name)}. Edit or clear it here; shared team memory is separate.</p><form><label>Imported context<textarea name="text" rows="12" maxlength="262144">${esc(bot.importedContext)}</textarea></label><div data-feedback hidden></div><div class="form-actions"><button type="submit">Save imported context</button></div></form></details>`;
       soul.closest("section").after(imported);
       const importedForm = imported.querySelector("form");
       submit(importedForm, async (data) => { await api(`/api/bots/${enc(name)}/imported-context`, { method: "PUT", body: { text: data.get("text") } }); if (modal.alive()) feedback(importedForm, "Imported context saved for new tasks.", "success"); });

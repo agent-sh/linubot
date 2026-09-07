@@ -25,8 +25,11 @@ their timestamps and speakers and never become active requests or approval grant
 Skills receive names scoped to the imported bot and retain their supporting files.
 After you confirm the preview, they are approved and attached by default so the
 bot can use them. Clear **Attach imported skills** to keep them as Library drafts.
-Up to 256 skills can be attached; the bot can search the full list with
+Full skill bodies stay out of the initial prompt. Up to 256 skills can be
+attached; the bot can search the full list with
 `list_skills` and load instructions/supporting files with `read_skill_file`.
+The combined imported memory is preserved up to 256 KiB; individual supported
+memory files are bounded during preview rather than silently dropped.
 Known credential filenames and hidden files are excluded from skill bundles.
 Source-specific tool references may need editing for Linubot.
 

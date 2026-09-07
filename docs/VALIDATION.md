@@ -6,7 +6,7 @@ not establish a provider account's current access or a model's correctness.
 
 ## Release acceptance: 2.9.0
 
-Checked on 2026-09-07: 317 source tests, eight source and packaged desktop
+Checked on 2026-09-07: 321 source tests, eight source and packaged desktop
 scenarios, and Android release build/lint passed. A phone-sized browser passed real private HTTPS
 pairing, chat, reload persistence and revocation. The signed Android APK passed
 HTTPS setup, pairing, task submission, authenticated Markdown artifact download
@@ -23,6 +23,9 @@ Permission tests cover default Ask first, per-bot overrides, persistence and
 release of pending requests. Import tests include exported Grok instructions,
 memory and usable skills, draft opt-out, unsafe folder rejection and attachment
 of more than forty skills. The native picker is required for HTTP folder import.
+Discovery tests use 200 MCP tools to verify that the initial request excludes
+their schemas, searches expose only selected definitions, and skill bodies appear
+only after a file read. The retained schema set is bounded.
 
 ## Release acceptance: 2.8.0
 
