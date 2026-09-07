@@ -30,8 +30,15 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
   try {
     app = await electron.launch({ args: [resolve('desktop/main.cjs')], env, ...(process.env.LINUBOT_TEST_EXECUTABLE ? { executablePath: process.env.LINUBOT_TEST_EXECUTABLE, args: [] } : {}) });
     const page = await app.firstWindow(); const errors = []; page.on('pageerror', (error) => errors.push(error.message));
+    const catalogRequests = [];
+    const nonPublicPresets = [['openai', 'https://api.openai.com/v1'], ['anthropic', 'https://api.anthropic.com/v1']];
+    let failTiyuvtaCatalog = false;
     await page.route('**/api/provider/models', async (route) => {
-      if (route.request().postDataJSON()?.baseUrl === 'https://api.tiyuvta.ai/v1') await route.fulfill({ status: 502, json: { error: 'Fixture catalog unavailable.' } });
+      const draft = route.request().postDataJSON(); catalogRequests.push(draft);
+      if (draft?.baseUrl === 'https://api.tiyuvta.ai/v1') {
+        if (failTiyuvtaCatalog) await route.fulfill({ status: 502, json: { error: 'Fixture catalog unavailable.' } });
+        else await route.fulfill({ json: { models: [{ id: 'tiyuvta-fixture-a', name: 'Tiyuvta fixture A' }, { id: 'tiyuvta-fixture-b', name: 'Tiyuvta fixture B' }], supported: true, truncated: false } });
+      } else if (nonPublicPresets.some(([, baseUrl]) => baseUrl === draft?.baseUrl)) await route.fulfill({ status: 502, json: { error: 'Unexpected non-public catalog request.' } });
       else await route.continue();
     });
     // Browser sign-in is observed without opening the user's browser during QA.
@@ -56,11 +63,24 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     await expect(page.locator('input[name=name]')).toHaveValue('Tiyuvta');
     await expect(page.locator('select[name=kind]')).toHaveValue('openai-compat');
     await expect(page.locator('select[name=auth]')).toHaveValue('bearer');
-    await expect(page.locator('[data-model-status]')).toContainText('Fixture catalog unavailable. Custom model IDs are available.');
+    await expect(picker.locator('option[value="tiyuvta-fixture-a"]')).toHaveText('Tiyuvta fixture A · tiyuvta-fixture-a');
+    await expect(picker.locator('option[value="tiyuvta-fixture-b"]')).toHaveText('Tiyuvta fixture B · tiyuvta-fixture-b');
+    await expect(page.locator('input[name=apiKey]')).toHaveValue('');
+    const tiyuvtaRequests = catalogRequests.filter((draft) => draft?.baseUrl === 'https://api.tiyuvta.ai/v1');
+    expect(tiyuvtaRequests).toHaveLength(1);
+    expect(tiyuvtaRequests[0].apiKey).toBeUndefined();
+    failTiyuvtaCatalog = true;
     await page.getByRole('button', { name: 'Add connection', exact: true }).click();
     await expect(page.locator('select[name=preset]')).toHaveValue('tiyuvta');
     await expect(page.locator('input[name=baseUrl]')).toHaveValue('https://api.tiyuvta.ai/v1');
     await expect(page.locator('input[name=name]')).toHaveValue('Tiyuvta');
+    await expect(page.locator('[data-model-status]')).toContainText('Fixture catalog unavailable. Custom model IDs are available.');
+    for (const [preset, baseUrl] of nonPublicPresets) {
+      await page.locator('select[name=preset]').selectOption(preset);
+      await expect(page.locator('input[name=baseUrl]')).toHaveValue(baseUrl);
+      await expect(page.locator('input[name=apiKey]')).toHaveValue('');
+      expect(catalogRequests.filter((draft) => draft?.baseUrl === baseUrl)).toHaveLength(0);
+    }
     await page.getByRole('textbox', { name: 'Connection name', exact: true }).fill('Responses lab');
     await page.locator('select[name=kind]').selectOption('responses');
     await page.getByRole('textbox', { name: 'Endpoint base URL', exact: true }).fill(`${base}/responses/v1`);
@@ -181,6 +201,7 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     await page.getByRole('button', { name: 'Upgrade to 2.7.0', exact: true }).click();
     await expect.poll(() => app.evaluate(() => globalThis.providerSignInUrl || '')).toContain('/linubot/releases/tag/v2.7.0');
     await page.screenshot({ path: join(directory, 'update-available.png'), fullPage: true });
+    expect(catalogRequests.filter((draft) => nonPublicPresets.some(([, baseUrl]) => baseUrl === draft?.baseUrl))).toHaveLength(0);
     expect(errors).toEqual([]);
   } finally {
     if (app) await app.close();
