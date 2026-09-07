@@ -28,3 +28,10 @@ private/
 *.bundle
 *TRIAL.json
 docs/artifacts/
+
+# Android local builds and signing files
+android/.gradle/
+android/**/build/
+android/local.properties
+*.jks
+*.keystore

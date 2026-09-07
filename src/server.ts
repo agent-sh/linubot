@@ -1,3 +1,6 @@
+import { createPhoneAccess } from "./phone/access.ts";
+import { phoneNetwork } from "./phone/tailscale.ts";
+import QRCode from "qrcode";
 import { createWorkspaceView } from "./computer/view.ts";
 import { createUpdates, type Updates } from "./updates.ts";
 import { xaiStatus, importHermesXai, beginXaiLogin, pollXaiLogin, disconnectXai, xaiModels } from "./auth/xai.ts";
@@ -88,7 +91,7 @@ function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { scheduler?: boolean; accessToken?: string; webRoot?: string; onProviderConnected?: (id: string) => void; openRouterRequest?: typeof fetch; importRoots?: ImportRoots; updates?: Updates } = {}) {
+export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { scheduler?: boolean; accessToken?: string; webRoot?: string; onProviderConnected?: (id: string) => void; openRouterRequest?: typeof fetch; importRoots?: ImportRoots; updates?: Updates; phonePort?: number } = {}) {
   const updates = options.updates ?? createUpdates();
   ensureMemoryFiles();
   const computer = options.computer ?? createComputer();
@@ -110,6 +113,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   });
   const imports = createAgentImports(options.importRoots || { hermes: process.env.LINUBOT_IMPORT_HERMES, grok: process.env.LINUBOT_IMPORT_GROK });
   const webRoot = options.webRoot ?? WEB;
+  const phone = createPhoneAccess({ webRoot, port: options.phonePort, target: () => { const address = server.address(); if (!address || typeof address === "string" || !options.accessToken) throw new InputError("Desktop server is not ready", 503); return { port: address.port, token: options.accessToken }; } });
   const streams = new Set<ServerResponse>();
   const evaluations = new Set<AbortController>();
   let stopping = false, updating = false;
@@ -206,10 +210,24 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
       const b = method === "GET" ? {} : await body(req);
       if (updating && method !== "GET") throw new InputError("Linubot is restarting for an update", 503);
 
+      if (r[0] === "phone") {
+        if (!options.accessToken || req.headers["x-linubot-client"] === "phone") throw new InputError("Phone access is managed by the Linux desktop app", 403);
+        if (r.length === 1 && method === "GET") { ok(phone.status()); return; }
+        if (r[1] === "enable" && method === "POST") {
+          if (b.origin) { ok(await phone.enable(requiredText(b.origin, "HTTPS address", 250))); return; }
+          const network = await phoneNetwork();
+          await phone.enable(network.origin);
+          try { await network.configure(); } catch (error) { await phone.disable(); throw error; }
+          ok(phone.status()); return;
+        }
+        if (r[1] === "disable" && method === "POST") { ok(await phone.disable()); return; }
+        if (r[1] === "pair" && method === "POST") { const pairing = phone.pair(); ok({ ...pairing, qr: await QRCode.toDataURL(pairing.url, { width: 256, margin: 2 }) }); return; }
+        if (r[1] === "devices" && r.length === 3 && method === "DELETE") { ok(phone.revoke(r[2])); return; }
+      }
       if (r[0] === "overview" && method === "GET") {
         ok({ provider: providerStatus(), bots: roster(), groups: groups(), summary: summarizeRuns(), runs: listRuns({ limit: 30 }),
           proposals: listProposals(), jobs: jobs(), schedulerError, memory: memoryUsage(),
-          capabilities: { tools: agentTools().map((tool) => tool.name), mcp: "connected-tools", connections: mcp.status(), search: readWebSearch().backend !== "disabled", web: true, desktop: Boolean(options.accessToken) } });
+          capabilities: { tools: agentTools().map((tool) => tool.name), mcp: "connected-tools", connections: mcp.status(), search: readWebSearch().backend !== "disabled", web: true, desktop: Boolean(options.accessToken), phone: req.headers["x-linubot-client"] === "phone" } });
         return;
       }
       if (r[0] === "stream" && method === "GET") {
@@ -585,6 +603,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     }, 15000);
     scheduler.unref();
   });
+  server.once("listening", () => { if (options.accessToken) void phone.start().catch(() => {}); });
   return { server, runtime, freezeForUpdate() {
     if (runtime.busy() || workspaceView.busy() || evaluations.size || jobsRunning) throw new InputError("Finish active tasks before upgrading Linubot", 409);
     updating = true; runtime.pauseAdmissions(true);
@@ -593,6 +612,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     stopping = true;
     clearInterval(scheduler);
     evaluations.forEach((controller) => controller.abort(new Error("Server is stopping")));
+    await phone.close();
     workspaceView.close();
     await runtime.close();
     await openRouter.close();

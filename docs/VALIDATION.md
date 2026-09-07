@@ -4,6 +4,21 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.9.0
+
+Checked on 2026-09-07: 311 source tests, seven source and packaged desktop
+scenarios, and Android release build/lint passed. A phone-sized browser passed real private HTTPS
+pairing, chat, reload persistence and revocation. The signed Android APK passed
+HTTPS setup, pairing, task submission, authenticated Markdown artifact download
+and Android sharing in an Android 15 emulator; downloaded bytes matched the
+created artifact. Pairing survived an app force-stop/restart. Physical phone and
+cellular connectivity remain user acceptance checks.
+
+Gateway tests cover origin/host checks, desktop-only management, hashed devices,
+one-use codes, attempt limits, restart persistence, revocation and upstream stream
+abortion. Existing Tailscale mappings were inspected before setup and preserved.
+The release signing key is retained outside the repository.
+
 ## Release acceptance: 2.8.0
 
 Checked on 2026-09-07: 307 source tests and six desktop scenarios passed

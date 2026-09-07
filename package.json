@@ -1,7 +1,7 @@
 {
   "name": "linubot",
   "private": true,
-  "version": "2.8.0",
+  "version": "2.9.0",
   "description": "A self-hosted Linux team of AI coworkers with web access and owned computer workspaces",
   "type": "module",
   "scripts": {
@@ -22,6 +22,7 @@
   "devDependencies": {
     "@playwright/test": "1.63.0",
     "@types/node": "^26.4.1",
+    "@types/qrcode": "^1.5.6",
     "electron": "44.2.0",
     "electron-builder": "26.15.3",
     "typescript": "^5.6.0"
@@ -33,6 +34,7 @@
     "@modelcontextprotocol/sdk": "1.30.0",
     "ipaddr.js": "2.5.0",
     "linkedom": "0.18.13",
+    "qrcode": "^1.5.4",
     "yaml": "2.9.0"
   },
   "main": "desktop/main.cjs",

@@ -1,15 +1,17 @@
+import { phoneSettings } from "./phone-settings.js";
 import { updateSettings } from "./updates.js";
 import { providerSettings } from "./providers.js";
 import { mcpSettings } from "./extensions.js";
 import { api, post, esc, enc, icon, badge, page, tabs, empty, dialog, submit, action, feedback, confirmAction, safeUrl, lines } from "./ui.js";
 
 export async function renderSettings(ctx) {
-  const pane = ["provider", "search", "mcp", "context"].includes(ctx.name) ? ctx.name : "provider";
-  ctx.root.innerHTML = page("Settings", "Manage your model, web access and connected tools.", `${tabs([["provider", "Provider & credentials", "#/settings/provider"], ["search", "Web search", "#/settings/search"], ["mcp", "Connected tools", "#/settings/mcp"], ["context", "Long conversations", "#/settings/context"]], pane)}<section class="section" data-app-updates></section><div data-settings-pane><p class="quiet-empty" role="status">Reading configuration...</p></div>`, "", "Settings / Local control");
+  const pane = ["provider", "search", "mcp", "context", "phone"].includes(ctx.name) ? ctx.name : "provider";
+  ctx.root.innerHTML = page("Settings", "Manage your model, web access and connected tools.", `${tabs([["provider", "Provider & credentials", "#/settings/provider"], ["search", "Web search", "#/settings/search"], ["mcp", "Connected tools", "#/settings/mcp"], ["context", "Long conversations", "#/settings/context"], ["phone", "Phone access", "#/settings/phone"]], pane)}<section class="section" data-app-updates></section><div data-settings-pane><p class="quiet-empty" role="status">Reading configuration...</p></div>`, "", "Settings / Local control");
   updateSettings(ctx, ctx.root.querySelector("[data-app-updates]"));
   const main = ctx.root.querySelector("[data-settings-pane]");
   if (pane === "provider") await providerSettings(ctx, main);
   else if (pane === "search") await searchSettings(ctx, main);
+  else if (pane === "phone") await phoneSettings(ctx, main);
   else if (pane === "context") await contextControls(ctx, main);
   else await mcpSettings(ctx, main);
 }

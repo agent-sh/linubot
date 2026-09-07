@@ -57,7 +57,9 @@ Automatic availability requires a stable `vMAJOR.MINOR.PATCH` tag, the matching
 `linubot-VERSION-x64.tar.gz` asset and a `SHA256SUMS` entry with its SHA-256 digest.
 The archive must contain the Linux executable, `resources/app.asar`, the
 application icon and the required runtime/license files at the expected paths.
-The Debian installer is a separate distribution artifact.
+The Debian installer is a separate distribution artifact. Releases also include
+a signed Android APK; install a newer APK on Android to update that client.
+The Linux upgrade button updates the Linux application only.
 
 On the qualified Linux x64 build machine:
 

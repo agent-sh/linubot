@@ -15,7 +15,7 @@ while [ "$#" -gt 0 ]; do
     --stage-only) linubot_stage=1; shift ;;
     --activate-only) linubot_activate=1; shift ;;
     --launch) linubot_relaunch=1; shift ;;
-    --help) echo 'Usage: bash install.sh [--version 2.8.0] [--build] [--launch]'; exit 0 ;;
+    --help) echo 'Usage: bash install.sh [--version 2.9.0] [--build] [--launch]'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
