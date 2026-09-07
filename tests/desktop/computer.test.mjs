@@ -52,6 +52,11 @@ test('embedded computer supports takeover, fresh input, closing, and direct bot 
     await page.getByRole('button', { name: 'Paste into computer', exact: true }).click();
     await expect.poll(() => inputs.some((value) => value.text === 'fixture-private-login')).toBe(true);
     expect(await page.locator('.feed-inner').innerText()).not.toContain('fixture-private-login');
+    await panel.getByRole('button', { name: 'Open sign-in browser', exact: true }).click();
+    await page.getByLabel('Website URL', { exact: true }).fill('https://example.com/login');
+    await page.getByRole('button', { name: 'Open website', exact: true }).click();
+    await expect(page.getByRole('dialog')).toBeHidden();
+    await expect.poll(() => inputs.some(value => value.action === 'sign-in-browser' && value.url === 'https://example.com/login')).toBe(true);
     await panel.getByRole('button', { name: 'Expand', exact: true }).click();
     await expect(panel).toHaveClass(/wide/);
     await panel.getByRole('button', { name: 'Shrink', exact: true }).click();
@@ -73,7 +78,7 @@ test('embedded computer supports takeover, fresh input, closing, and direct bot 
     await toggle.click();
     await expect(screen).toHaveClass(/controlling/);
     await panel.getByRole('button', { name: 'Return to bot', exact: true }).click();
-    expect(manual).toBe(false);
+    await expect.poll(() => manual).toBe(false);
     await panel.getByRole('button', { name: 'Close computer', exact: true }).click();
     await expect(panel).toBeHidden();
     await page.getByLabel('Bot options', { exact: true }).click();

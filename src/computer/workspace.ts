@@ -1,6 +1,7 @@
 import { execFile, spawn } from "node:child_process";
+import { mkdirSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { dataDir, readJson, writeJson } from "../store.ts";
 import { InputError, requiredText } from "../errors.ts";
@@ -198,6 +199,7 @@ export function createComputer(run: Runner = defaultRunner) {
       if (parsed.dry_run !== false || !Array.isArray(parsed.removed) || !Array.isArray(parsed.skipped) ||
         [...parsed.removed, ...parsed.skipped].some((entry) => entry?.id !== id)) throw new Error("invalid scoped cleanup response");
       if (parsed.skipped.length) throw new Error(`workspace cleanup skipped: ${parsed.skipped[0].reason ?? id}`);
+      rmSync(join(resolve(dataDir()), "computer-browsers", id), { recursive: true, force: true });
       writeJson(ownedPath(), ownedWorkspaces().filter((entry) => entry.id !== id));
       return output;
     },
@@ -265,6 +267,18 @@ export function createComputer(run: Runner = defaultRunner) {
       const output = await run(args);
       response(output);
       return output;
+    },
+    async openSignInBrowser(value: string, id: string, options?: CommandOptions): Promise<string> {
+      const owned = requireOwned(id);
+      if (owned.state !== "running") throw new InputError("This computer has stopped", 409);
+      const url = new URL(requiredText(value, "Website URL", 2000));
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new InputError("Use a website URL without embedded credentials");
+      const profile = join(resolve(dataDir()), "computer-browsers", id);
+      mkdirSync(profile, { recursive: true, mode: 0o700 });
+      // Launch an ordinary browser through the owned desktop, without a DevTools
+      // endpoint. Keep this separate from both host and automated browser profiles.
+      return scoped(["launch", "--name", "Sign-in browser", "--", process.env.LINUBOT_BROWSER_WRAPPER ?? fileURLToPath(new URL("../../desktop/linubot-chrome.sh", import.meta.url)),
+        `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--ozone-platform=x11", "--new-window", url.href], id, options);
     },
     openBrowser: (id: string): Promise<string> => scoped(["open-browser", "--browser", process.env.LINUBOT_BROWSER_WRAPPER ?? fileURLToPath(new URL("../../desktop/linubot-chrome.sh", import.meta.url))], id),
     browserTargets: (id: string): Promise<string> => scoped(["browser-targets"], id),

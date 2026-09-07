@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import type { AddressInfo } from "node:net";
 import { createComputer } from "../src/computer/workspace.ts";
 import type { Runner } from "../src/computer/workspace.ts";
@@ -49,6 +49,25 @@ async function fixture(intercept?: (args: string[], options: Parameters<Runner>[
 }
 
 describe("embedded owned computer control", () => {
+  it("opens a normal browser only under current owner control, preserves its mode and cleans its task profile", async () => {
+    const { computer, view, calls } = await fixture(), ctrl = signal();
+    process.env.LINUBOT_DATA = relative(process.cwd(), directory);
+    await assert.rejects(() => view.input(ID, "no-token", { action: "sign-in-browser", url: "https://example.com" }), hasStatus(403));
+    const { token } = await view.take(ID, ctrl.signal);
+    for (const url of ["file:///etc/passwd", "https://user:password@example.com"]) {
+      await assert.rejects(() => view.input(ID, token, { action: "sign-in-browser", url }), hasStatus(502));
+    }
+    assert.equal(calls.filter(call => call.args[1] === "launch").length, 0);
+    await view.input(ID, token, { action: "sign-in-browser", url: "https://example.com/login" });
+    const launch = calls.find(call => call.args[1] === "launch")!.args;
+    assert.ok(launch.includes(`--user-data-dir=${join(directory, "computer-browsers", ID)}`));
+    assert.ok(!launch.some(arg => /remote-debugging|enable-automation|headless|no-sandbox/.test(arg)));
+    assert.equal(view.status(ID).standardBrowser, true);
+    await view.release(ID, token); assert.equal(view.status(ID).standardBrowser, true);
+    await computer.stop(ID); await computer.cleanup(ID);
+    assert.equal(existsSync(join(directory, "computer-browsers", ID)), false);
+  });
+
   it("rejects unowned frame, takeover, input and agent requests before reaching the runner", async () => {
     const { view, calls } = await fixture(), ctrl = signal();
     for (const id of [OTHER, "host-desktop", "../outside"]) {
@@ -245,6 +264,38 @@ describe("embedded owned computer control", () => {
         gate.resolve(); await Promise.all([taking, agent]); rmSync(join(directory, "computer-workspaces.json"));
       }
     }
+  });
+
+  it("continues in the regular browser without reading or navigating the old automated tab", async () => {
+    const { computer, view, calls } = await fixture();
+    setProvider({ kind: "openai-compat", baseUrl: "https://fixture.example/v1", apiKey: "fixture-key", model: "fixture-model" }); createBot("SignInBot");
+    const steps = [
+      ["start_workspace", { purpose: "Browser continuity fixture" }],
+      ["browse_workspace", { url: "https://example.com/automated" }],
+      ["open_sign_in_browser", { url: "https://example.com/login" }],
+      ["browse_workspace", { url: "https://example.com/continue" }],
+      ["observe_workspace", {}],
+    ] as const;
+    let index = 0;
+    const runtime = createAgentRuntime({ computer, workspaceView: view, review: false, complete: async (_provider, messages) => {
+      if (index === steps.length) {
+        const results = messages.filter(message => message.role === "tool").map(message => JSON.parse(message.content.slice(message.content.indexOf("\n") + 1)));
+        assert.equal(results.at(-1).browser.mode, "standard");
+        assert.ok(results.every(result => !result.error), JSON.stringify(results));
+        return { text: "Continued in the sign-in browser", toolCalls: [] };
+      }
+      const [name, args] = steps[index++];
+      return { text: "", toolCalls: [{ id: `browser-step-${index}`, name, arguments: JSON.stringify(args) }] };
+    } });
+    const approve = (scope: string, event: FeedEvent) => { if (scope === "bot:SignInBot" && event.kind === "approval" && event.status === "pending") setImmediate(() => runtime.decide(scope, event.seq, "approved")); };
+    bus.on("event", approve);
+    try {
+      const [run] = runtime.enqueue({ scope: "bot:SignInBot", message: "Use a regular browser for sign-in and continue there" });
+      const result = await runtime.wait(run.id); assert.equal(result.status, "completed", result.error ?? "");
+      assert.equal(calls.filter(call => call.args[1] === "browser-snapshot").length, 1);
+      assert.equal(calls.filter(call => call.args[1] === "browser-navigate").length, 1);
+      assert.equal(calls.filter(call => call.args[1] === "launch").length, 2);
+    } finally { bus.off("event", approve); await runtime.close(); }
   });
 
   it("pauses the task budget as soon as the owner takes over during a pending model request", { timeout: 3000 }, async (t) => {

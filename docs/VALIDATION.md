@@ -4,6 +4,18 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.7.2
+
+Checked on 2026-09-07: 299 source tests and five desktop scenarios passed
+from source and the packaged executable. The regular sign-in browser is tested
+against a real local Chrome fixture:
+remote automation is absent, its cookies are separate from the automated
+browser, same-task continuation retains those cookies, and cleanup removes the
+profile. The fixture also uses a relative data-directory override. Google account
+acceptance is not tested. The Computer panel test also
+covers opening the website under manual control, and runtime regression checks
+prevent returning to the old automated tab after switching browser modes.
+
 ## Release acceptance: 2.7.1
 
 Checked on 2026-09-07: 297 source tests and five desktop scenarios passed
