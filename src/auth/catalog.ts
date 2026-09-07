@@ -6,7 +6,8 @@ import { CODEX_BASE, codexModels } from "./codex.ts";
 import { GOOGLE_BASE } from "./google.ts";
 import { authenticatedProvider } from "./providers.ts";
 
-export const providerPresets: { id: string; name: string; kind: ProviderKind; baseUrl: string; auth: ProviderAuth }[] = [
+export const providerPresets: { id: string; name: string; kind: ProviderKind; baseUrl: string; auth: ProviderAuth; featured?: boolean; publicCatalog?: boolean }[] = [
+  { id: "tiyuvta", name: "Tiyuvta", kind: "openai-compat", baseUrl: "https://api.tiyuvta.ai/v1", auth: "bearer", featured: true, publicCatalog: true },
   { id: "xai-oauth", name: "xAI OAuth", kind: "xai-oauth", baseUrl: "https://api.x.ai/v1", auth: "bearer" },
   { id: "openai", name: "OpenAI", kind: "responses", baseUrl: "https://api.openai.com/v1", auth: "bearer" },
   { id: "openai-codex", name: "OpenAI / ChatGPT sign-in", kind: "openai-codex", baseUrl: CODEX_BASE, auth: "bearer" },

@@ -1,6 +1,7 @@
 import { post, esc, enc, action, feedback } from "./ui.js";
 
 const guides = {
+  tiyuvta: ["Get a Tiyuvta API key", "https://inference.tiyuvta.ai/login?next=/app/keys", "Sign in to the Tiyuvta console, create a key, paste it here. Models load from the public catalog."],
   anthropic: ["Create an Anthropic API key", "https://platform.claude.com/settings/keys", "Claude subscriptions do not provide a general third-party OAuth login. Use a Console API key."],
   openai: ["Create an OpenAI API key", "https://platform.openai.com/api-keys", "For a ChatGPT account, choose OpenAI / ChatGPT sign-in instead."],
   gemini: ["Get a Gemini API key", "https://aistudio.google.com/apikey", "The quickest Gemini setup is an AI Studio API key. Google Gemini OAuth is also available with your own Google Cloud client."],

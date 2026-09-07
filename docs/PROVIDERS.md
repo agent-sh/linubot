@@ -19,6 +19,7 @@ depend on your endpoint and account.
 
 | Provider | Connection method |
 | --- | --- |
+| Tiyuvta | API key; models load from the public catalog before entering a key |
 | OpenAI / ChatGPT | Browser sign-in or existing login through the installed Codex CLI |
 | OpenAI API | API key for the standard Responses API |
 | Anthropic | Claude Console API key |
@@ -32,6 +33,17 @@ depend on your endpoint and account.
 
 A consumer subscription and an API key are different access methods. Linubot
 offers browser sign-in only for the implemented flows below.
+
+## Tiyuvta
+
+Tiyuvta is Linubot's own hosted inference. OpenAI-compatible, pay per use, new accounts start with free credit.
+
+Choose **Connect Tiyuvta** in provider settings. The preset fills
+`https://api.tiyuvta.ai/v1` and loads models from its public catalog without a key.
+[Get an API key](https://inference.tiyuvta.ai/login?next=/app/keys), paste it into
+Linubot, choose a model and save the connection. See the
+[quickstart](https://inference.tiyuvta.ai/quickstart) for setup help.
+Other providers remain available in the provider selector.
 
 ## OpenAI / ChatGPT through Codex
 
@@ -146,6 +158,7 @@ the provider's own page.
 
 | Preset | API base | Format |
 | --- | --- | --- |
+| Tiyuvta | `https://api.tiyuvta.ai/v1` | Chat Completions |
 | OpenAI | `https://api.openai.com/v1` | Responses |
 | Anthropic | `https://api.anthropic.com/v1` | Messages |
 | xAI API | `https://api.x.ai/v1` | Responses |

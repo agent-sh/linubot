@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
 test('connection catalogs, per-bot choices, and browser sign-in work in the desktop', async () => {
-  const directory = mkdtempSync(join(tmpdir(), 'linubot-provider-ui-'));
+  const directory = mkdtempSync(join(tmpdir(), 'linubot-tiyuvta-provider-ui-'));
   const requests = [];
   const server = createServer(async (req, res) => {
     res.setHeader('content-type', 'application/json');
@@ -30,10 +30,19 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
   try {
     app = await electron.launch({ args: [resolve('desktop/main.cjs')], env, ...(process.env.LINUBOT_TEST_EXECUTABLE ? { executablePath: process.env.LINUBOT_TEST_EXECUTABLE, args: [] } : {}) });
     const page = await app.firstWindow(); const errors = []; page.on('pageerror', (error) => errors.push(error.message));
+    await page.route('**/api/provider/models', async (route) => {
+      if (route.request().postDataJSON()?.baseUrl === 'https://api.tiyuvta.ai/v1') await route.fulfill({ status: 502, json: { error: 'Fixture catalog unavailable.' } });
+      else await route.continue();
+    });
     // Browser sign-in is observed without opening the user's browser during QA.
     await app.evaluate(({ shell }) => { shell.openExternal = async (url) => { globalThis.providerSignInUrl = url; }; });
     await page.evaluate(() => { location.hash = '#/settings/provider'; });
     await expect(page.getByRole('heading', { name: 'Connection settings', exact: true })).toBeVisible();
+    const featured = page.locator('.provider-featured');
+    await expect(featured).toBeVisible();
+    await expect(featured.getByRole('heading', { name: 'Tiyuvta', exact: true })).toBeVisible();
+    await expect(page.locator('select[name=preset] option').nth(0)).toHaveText('Tiyuvta');
+    await expect(page.locator('select[name=preset] option').nth(1)).toHaveText('Custom endpoint');
     const picker = page.locator('[data-provider-model] select');
     await expect(picker.locator('option[value="fixture-b"]')).toHaveCount(1);
     await picker.selectOption('fixture-b');
@@ -42,7 +51,16 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     await page.getByRole('button', { name: 'Test connection', exact: true }).click();
     await expect(page.locator('[data-test-output]')).toContainText('fixture-b: Connected.');
 
+    await featured.getByRole('button', { name: 'Connect Tiyuvta', exact: true }).click();
+    await expect(page.locator('input[name=baseUrl]')).toHaveValue('https://api.tiyuvta.ai/v1');
+    await expect(page.locator('input[name=name]')).toHaveValue('Tiyuvta');
+    await expect(page.locator('select[name=kind]')).toHaveValue('openai-compat');
+    await expect(page.locator('select[name=auth]')).toHaveValue('bearer');
+    await expect(page.locator('[data-model-status]')).toContainText('Fixture catalog unavailable. Custom model IDs are available.');
     await page.getByRole('button', { name: 'Add connection', exact: true }).click();
+    await expect(page.locator('select[name=preset]')).toHaveValue('tiyuvta');
+    await expect(page.locator('input[name=baseUrl]')).toHaveValue('https://api.tiyuvta.ai/v1');
+    await expect(page.locator('input[name=name]')).toHaveValue('Tiyuvta');
     await page.getByRole('textbox', { name: 'Connection name', exact: true }).fill('Responses lab');
     await page.locator('select[name=kind]').selectOption('responses');
     await page.getByRole('textbox', { name: 'Endpoint base URL', exact: true }).fill(`${base}/responses/v1`);
@@ -57,12 +75,10 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     const secondId = await page.locator('[data-connection]').inputValue();
     await expect(page.locator('[data-edit-provider]')).toHaveCount(2);
     await page.locator('.provider-roster').scrollIntoViewIfNeeded();
-    mkdirSync('test-results', { recursive: true });
-    await page.screenshot({ path: 'test-results/provider-roster.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'provider-roster.png'), fullPage: true });
     await page.getByRole('button', { name: 'Test connection', exact: true }).click();
     await expect(page.locator('[data-test-output]')).toContainText('response-a: Connected.');
-    mkdirSync('test-results', { recursive: true });
-    await page.screenshot({ path: 'test-results/provider-connections.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'provider-connections.png'), fullPage: true });
 
     await page.evaluate(async (id) => {
       const response = await fetch('/api/bots', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'Dual', providerId: id, model: 'response-b' }) });
@@ -79,7 +95,7 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     await page.getByText('Model, skills & preferences', { exact: true }).click();
     await expect(page.locator('select[name=providerId]')).toHaveValue(secondId);
     await expect(page.locator('[data-bot-model-picker] select')).toHaveValue('response-b');
-    await page.screenshot({ path: 'test-results/bot-provider-picker.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'bot-provider-picker.png'), fullPage: true });
     await page.keyboard.press('Escape');
 
     await page.evaluate(() => { location.hash = '#/settings/provider'; });
@@ -90,13 +106,13 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256');
     const callback = new URL(authUrl.searchParams.get('callback_url')); callback.searchParams.set('state', 'invalid'); callback.searchParams.set('code', 'unapproved');
     expect((await fetch(callback)).status).toBe(400);
-    await page.screenshot({ path: 'test-results/provider-browser-sign-in.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'provider-browser-sign-in.png'), fullPage: true });
     await page.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
     await expect(page.locator('.browser-connect:visible [data-feedback]')).toHaveText('Sign-in cancelled.');
     await page.route('**/api/provider/models', async (route) => {
       if (route.request().postDataJSON()?.baseUrl === 'https://api.meta.ai/v1') {
         await route.fulfill({ json: { models: [{ id: 'muse-spark-1.3-contributor', name: 'Muse Spark 1.3 Contributor' }, { id: 'muse-spark-1.3', name: 'Muse Spark 1.3' }], supported: true, truncated: false } });
-      } else await route.continue();
+      } else await route.fallback();
     });
     await page.getByRole('button', { name: 'Add connection', exact: true }).click();
     await page.locator('select[name=preset]').selectOption('muse');
@@ -108,21 +124,21 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     await expect(page.locator('[data-default-model]')).toHaveText('fixture-b');
     await expect(page.locator('[data-connection] option')).toHaveCount(3);
     await expect(page.locator('input[name=apiKey]')).toHaveValue('');
-    await page.screenshot({ path: 'test-results/muse-connection.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'muse-connection.png'), fullPage: true });
     await page.evaluate(() => { location.hash = '#/settings/context'; });
     await expect(page.getByRole('heading', { name: 'Long conversations', exact: true })).toBeVisible();
     await page.locator('input[name=inputBudget]').fill('14000');
     await page.locator('input[name=targetTokens]').fill('3000');
     await page.getByRole('button', { name: 'Save context settings', exact: true }).click();
     await expect(page.locator('[data-context-settings] [data-feedback]')).toHaveText('Context settings saved for new tasks.');
-    await page.screenshot({ path: 'test-results/context-controls.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'context-controls.png'), fullPage: true });
     await page.evaluate(() => { location.hash = '#/settings/provider'; });
     await page.locator('select[name=preset]').selectOption('openai-codex');
     await expect(page.getByRole('button', { name: 'Sign in with ChatGPT', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Use existing Codex sign-in', exact: true })).toBeVisible();
     await expect(page.locator('input[name=apiKey]')).toBeHidden();
     await expect(page.locator('input[name=baseUrl]')).toHaveAttribute('readonly', '');
-    await page.screenshot({ path: 'test-results/chatgpt-setup.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'chatgpt-setup.png'), fullPage: true });
     await page.locator('select[name=preset]').selectOption('google-oauth');
     await expect(page.getByRole('button', { name: 'Sign in with Google', exact: true })).toBeVisible();
     await page.locator('[data-google-client]').setInputFiles({ name: 'desktop-client.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ installed: { client_id: 'fixture.apps.googleusercontent.com', client_secret: 'fixture-client-secret', project_id: 'fixture-project' } })) });
@@ -139,13 +155,32 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
       await expect(page.locator('input[name=apiKey]')).toBeVisible();
       if (preset.startsWith('qwen')) await expect(page.getByRole('button', { name: 'Use Qwen Code key', exact: true })).toBeVisible();
     }
-    await page.screenshot({ path: 'test-results/coding-plan-setup.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'coding-plan-setup.png'), fullPage: true });
+    const overview = await page.evaluate(async () => {
+      const response = await fetch('/api/overview');
+      if (!response.ok) throw new Error('Could not read test overview');
+      return response.json();
+    });
+    await page.route('**/api/overview', (route) => route.fulfill({ json: { ...overview, provider: { ...overview.provider, ready: false } } }));
+    await page.evaluate(() => { location.hash = '#/home'; });
+    await page.reload();
+    await expect(page.locator('.connect-line')).toContainText('Connect a model to start chatting.');
+    await expect(page.locator('#provider-status')).toHaveText('Connect a model');
+    await expect(page.locator('#provider-status')).toHaveAttribute('title', 'Open provider settings');
+    await expect(page.locator('#provider-status')).toHaveAttribute('href', '#/settings/provider?preset=tiyuvta');
+    await page.getByRole('link', { name: 'Connect Tiyuvta', exact: true }).click();
+    await expect(page.locator('select[name=preset]')).toHaveValue('tiyuvta');
+    await expect(page.locator('input[name=baseUrl]')).toHaveValue('https://api.tiyuvta.ai/v1');
+    await expect(page.locator('input[name=name]')).toHaveValue('Tiyuvta');
+    await page.evaluate(() => { location.hash = '#/home'; });
+    await page.getByRole('link', { name: 'Other providers', exact: true }).click();
+    await expect(page.locator('[data-connection]')).not.toHaveValue('');
     await page.route('**/api/updates', (route) => route.fulfill({ json: { currentVersion: '2.6.0', latest: { version: '2.7.0', url: 'https://github.com/agent-sh/linubot/releases/tag/v2.7.0' }, canInstall: false } }));
     await page.reload();
     await expect(page.getByRole('button', { name: 'Upgrade to 2.7.0', exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Upgrade to 2.7.0', exact: true }).click();
     await expect.poll(() => app.evaluate(() => globalThis.providerSignInUrl || '')).toContain('/linubot/releases/tag/v2.7.0');
-    await page.screenshot({ path: 'test-results/update-available.png', fullPage: true });
+    await page.screenshot({ path: join(directory, 'update-available.png'), fullPage: true });
     expect(errors).toEqual([]);
   } finally {
     if (app) await app.close();
