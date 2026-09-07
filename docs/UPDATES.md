@@ -73,3 +73,8 @@ Test a candidate on its documented Linux/glibc baseline, verify its package
 contents, and exercise upgrade behavior in an isolated user profile before
 publishing. Source fixture CI does not qualify bundled binaries for older
 distributions. See [validation](VALIDATION.md).
+
+The artifact script rejects the current builder's home path in the application
+archive and bundled workspace/runners. This is a targeted guard, not a full
+secret scan. Inspect both the tar archive and Debian payload before publication,
+and confirm they contain the same tested application and runtime bytes.

@@ -5,7 +5,9 @@ its own local backend; you do not need a browser tab or a separate server.
 
 ## Install a release
 
-The standard release targets **Linux x86-64, Ubuntu 26.04 / glibc 2.43 or newer**.
+The standard release requires **Linux x86-64 with glibc 2.39 or newer**. The
+desktop and workspace have been tested on **Ubuntu 26.04**; the measured binary
+ABI minimum is not a claim that every distribution meeting it has been tested.
 It includes Electron/Node, the workspace backend and Python extension runners.
 You still need the desktop GUI libraries and system utilities used by computer
 workspaces. A prebuilt installation does not require Node or npm to build the app.
@@ -37,7 +39,7 @@ are retained, and application data stays in its separate location.
 To pin a release instead of selecting the latest:
 
 ```sh
-bash /tmp/linubot-install.sh --version 2.6.0 --launch
+bash /tmp/linubot-install.sh --version 2.6.1 --launch
 ```
 
 The sidebar offers upgrades when a newer suitable release exists. See
@@ -76,7 +78,7 @@ have additional prerequisites below.
 The installer can also build a tagged release:
 
 ```sh
-bash /tmp/linubot-install.sh --version 2.6.0 --build --launch
+bash /tmp/linubot-install.sh --version 2.6.1 --build --launch
 ```
 
 This needs Git, Node.js 24+, npm and the Electron GUI libraries. It builds the
@@ -110,29 +112,37 @@ supporting files, and installing a skill does not execute its scripts.
 
 ## Build a Debian package
 
-The current package configuration targets **Linux x86-64 with glibc 2.43 or
-newer**, including Ubuntu 26.04. Packaging does not make arbitrary locally
-compiled binaries portable to older systems.
+The current package configuration requires **Linux x86-64 with glibc 2.39 or
+newer**. Packaged desktop and workspace behavior has been tested on Ubuntu
+26.04. Packaging does not make arbitrary locally compiled binaries portable to
+other systems.
 
-The packager bundles the workspace executable plus `uv` and `uvx`. By default,
-all three are read from `~/.local/bin`. To use another location:
+By default, the packager downloads the public **agent-workspace-linux 0.3.2**
+release and verifies its pinned SHA-256 before bundling it. A local workspace
+installation is not required for packaging. The release build also needs locally
+installed **uv and uvx 0.11.7**, read from `~/.local/bin` by default. To select
+another directory containing those runners:
 
 ```sh
-LINUBOT_WORKSPACE_BIN=/path/to/agent-workspace-linux \
 LINUBOT_UV_DIR=/path/to/uv-directory \
 npm run package:linux
 ```
 
-`LINUBOT_UV_DIR` must contain both `uv` and `uvx`. The package includes their
-recorded versions, SHA-256 hashes and license texts. Building requires network
-access for dependency/license downloads and a compatible workspace binary.
+`LINUBOT_UV_DIR` must contain both `uv` and `uvx`. The package includes recorded
+versions, SHA-256 hashes and license texts. Building requires network access for
+dependency, workspace and license downloads.
+
+`LINUBOT_WORKSPACE_BIN` explicitly overrides the pinned workspace download for
+custom builds. Verify the chosen binary's ABI, behavior and public provenance
+before distributing it; a different local build does not inherit the default
+release's qualification.
 
 Outputs are under `release/`: a Debian installer named for the package version
 and an unpacked application at `release/linux-unpacked/linubot`. Install a
 specific built installer with your package manager:
 
 ```sh
-sudo apt install ./release/linubot-2.6.0-amd64.deb
+sudo apt install ./release/linubot-2.6.1-amd64.deb
 ```
 
 For a user installation with versioned directories, use the release installer
@@ -147,7 +157,7 @@ profile. Conversations and settings remain separate from application files.
 | `LINUBOT_DATA` | Application data directory; overrides the default |
 | `XDG_DATA_HOME` | Desktop data defaults to `$XDG_DATA_HOME/linubot` when set |
 | `LINUBOT_DESKTOP_PROFILE` | Separate Electron profile, useful for isolated tests |
-| `LINUBOT_WORKSPACE_BIN` | Workspace executable for development and packaging |
+| `LINUBOT_WORKSPACE_BIN` | Workspace executable for development; explicit override of packaging's pinned download |
 | `LINUBOT_UV_DIR` | Directory containing the `uv` and `uvx` binaries for packaging |
 | `LINUBOT_INSTALL_ROOT` | Parent directory for versioned user installations; defaults to `~/.local/opt` |
 

@@ -1,13 +1,25 @@
-import { copyFileSync, mkdirSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
+import { copyFileSync, mkdirSync, writeFileSync, readFileSync, chmodSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { homedir } from 'node:os';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { fetchPublic } from '../dist/network/http.js';
 
-const binary = process.env.LINUBOT_WORKSPACE_BIN || join(homedir(), '.local/bin/agent-workspace-linux');
+const workspaceVersion = '0.3.2';
+const workspaceSha256 = '130434f781370462c30fc793710528cbd72358d2e9b9976d56606a1d8d649f5d';
+const cached = resolve('build/downloads/agent-workspace-linux');
+if (!process.env.LINUBOT_WORKSPACE_BIN) {
+  if (process.platform !== 'linux' || process.arch !== 'x64') throw new Error('The bundled release is qualified for Linux x64.');
+  mkdirSync('build/downloads', { recursive: true });
+  if (!existsSync(cached) || createHash('sha256').update(readFileSync(cached)).digest('hex') !== workspaceSha256) {
+    const downloaded = (await fetchPublic(`https://github.com/agent-sh/agent-workspace-linux/releases/download/v${workspaceVersion}/agent-workspace-linux-x86_64-unknown-linux-gnu`, { maxBytes: 128 * 1024 * 1024 })).bytes;
+    if (createHash('sha256').update(downloaded).digest('hex') !== workspaceSha256) throw new Error('Workspace release checksum mismatch');
+    writeFileSync(cached, downloaded, { mode: 0o755 });
+  }
+}
+const binary = process.env.LINUBOT_WORKSPACE_BIN || cached;
 const destination = 'build/workspace';
 mkdirSync(destination, { recursive: true });
 const bytes = readFileSync(binary);
@@ -30,7 +42,7 @@ for (const name of ['uv', 'uvx']) {
 }
 writeFileSync('build/runners/provenance.json', JSON.stringify({ source: 'https://github.com/astral-sh/uv', runners }, null, 2));
 for (const [path, url] of [
-  ['build/workspace/LICENSE', 'https://raw.githubusercontent.com/agent-sh/agent-workspace-linux/main/LICENSE'],
+  ['build/workspace/LICENSE', 'https://raw.githubusercontent.com/agent-sh/agent-workspace-linux/v0.3.2/LICENSE'],
   ['build/runners/LICENSE-MIT', 'https://raw.githubusercontent.com/astral-sh/uv/0.11.7/LICENSE-MIT'],
   ['build/runners/LICENSE-APACHE', 'https://raw.githubusercontent.com/astral-sh/uv/0.11.7/LICENSE-APACHE'],
 ]) writeFileSync(path, (await fetchPublic(url)).bytes);

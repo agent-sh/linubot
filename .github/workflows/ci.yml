@@ -33,7 +33,8 @@ jobs:
 
   desktop:
     # Runs Electron fixtures from source. The packaged workspace runtime requires
-    # its own checks on the documented Ubuntu 26.04 / glibc 2.43 baseline.
+    # its own checks: shipped binaries require glibc 2.39+, while packaged
+    # desktop/workspace behavior is currently tested on Ubuntu 26.04.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:

@@ -1,7 +1,7 @@
 {
   "name": "linubot",
   "private": true,
-  "version": "2.6.0",
+  "version": "2.6.1",
   "description": "A self-hosted Linux team of AI coworkers with web access and owned computer workspaces",
   "type": "module",
   "scripts": {
@@ -110,7 +110,7 @@
         "libxkbcommon-x11-0",
         "npm",
         "chromium | chromium-browser | google-chrome-stable",
-        "libc6 (>= 2.43)"
+        "libc6 (>= 2.39)"
       ]
     }
   },

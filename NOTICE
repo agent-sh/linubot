@@ -30,12 +30,15 @@ Desktop runtime and build/test tools:
 
 Additional executables included by the Linux packaging script:
 
-  agent-workspace-linux - MIT
+  agent-workspace-linux 0.3.2 - MIT
     https://github.com/agent-sh/agent-workspace-linux
+    The default packager downloads the public release and verifies a pinned
+    SHA-256 digest. A custom build may explicitly override that executable.
     The package includes its license and version/hash provenance under
     resources/workspace/.
-  uv and uvx - MIT OR Apache-2.0
+  uv and uvx 0.11.7 - MIT OR Apache-2.0
     https://github.com/astral-sh/uv
+    These runners are supplied locally for the release build.
     The package includes both license texts and version/hash provenance
     under resources/runners/.
 

@@ -12,8 +12,9 @@ Bots and conversations are the main screen. Each helper has its own mascot;
 groups bring helpers together. Learning, evaluations and detailed controls are
 there when you need them, under Advanced.
 
-Install the latest stable release on **Linux x86-64, Ubuntu 26.04 / glibc 2.43
-or newer** with the [user installer](install.sh):
+Install the latest stable release on **Linux x86-64 with glibc 2.39 or newer**
+using the [user installer](install.sh). The desktop and workspace have been
+tested on Ubuntu 26.04:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/agent-sh/linubot/main/install.sh -o /tmp/linubot-install.sh
@@ -84,10 +85,10 @@ the services you choose. See [architecture and storage](docs/ARCHITECTURE.md).
 
 ## Requirements and limits
 
-Linubot is for Linux. The current Debian packaging baseline is **x86-64,
-Ubuntu 26.04 / glibc 2.43 or newer**. Older distributions and other architectures
-need separately built and tested dependencies; source availability does not
-qualify them automatically.
+Linubot is for Linux. Shipped x86-64 binaries require **glibc 2.39 or newer**.
+The desktop and real workspace have been tested on **Ubuntu 26.04**. Meeting the
+glibc minimum alone does not qualify another distribution or architecture;
+those environments need their own dependency and behavior checks.
 
 An owned desktop separates display and input. It is not, by itself, a filesystem
 security boundary. Executable tools run under your Linux account. Review the
