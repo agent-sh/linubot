@@ -41,8 +41,10 @@ the temporary workspace clipboard used for pasted text is cleared, and the bot
 then observes the current screen. Those subsequent observations can
 be retained in its normal task activity and sent to the selected model.
 
-Time spent waiting for your control does not consume the bot's ordinary task
-execution allowance. **Stop** still cancels the task when you explicitly ask.
+Tasks have no default overall time deadline. If an explicit execution budget is
+configured by an embedding caller, approval waiting, manual control and context
+maintenance do not consume it. Individual model and tool requests retain their
+own timeouts. **Stop** still cancels the task when you explicitly ask.
 
 ## Lifetime and access
 

@@ -29,6 +29,22 @@ it("coalesces update checks and prevents concurrent installs", async () => {
   assert.equal(installs, 1); assert.equal(updates.status().installing, false);
 });
 
+it("refreshes on foreground checks and retries failed checks without a six-hour delay", async (t) => {
+  let now = Date.now(), calls = 0, fail = false;
+  t.mock.method(Date, "now", () => now);
+  const updates = createUpdates({ version: "2.6.0", check: async () => { calls++; if (fail) throw new Error("offline"); return calls === 1 ? release("2.6.0") : release(); } });
+  assert.equal((await updates.check()).latest, undefined);
+  now += 61000;
+  assert.equal((await updates.check()).latest, undefined); assert.equal(calls, 1);
+  assert.equal((await updates.check(true)).latest?.version, "2.7.0"); assert.equal(calls, 2);
+  now += 15 * 60000; fail = true;
+  assert.match((await updates.check()).error!, /Could not check/);
+  now += 61000; fail = false;
+  assert.equal((await updates.check()).error, undefined); assert.equal(calls, 4);
+  const disabled = createUpdates({ enabled: false, check: async () => { assert.fail("Disabled checks must not contact GitHub"); } });
+  assert.equal((await disabled.check(true)).enabled, false);
+});
+
 it("freezes late HTTP writes and runtime admission during update activation, and can resume on failure", async () => {
   const data = mkdtempSync(join(tmpdir(), "linubot-update-gate-")); process.env.LINUBOT_DATA = data;
   const app = createApp({ scheduler: false });

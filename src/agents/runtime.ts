@@ -180,21 +180,21 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
     const start = Date.now();
     const timeout = new AbortController();
     const signal = AbortSignal.any([batch.ctrl.signal, timeout.signal]);
-    const budgetMs = options.timeoutMs ?? 600_000;
+    const budgetMs = options.timeoutMs;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    let observedRevision = 0, decisionRevision = 0, workMs = 0, compactionMs = 0, clockAt = start;
-    let ownerHeld = false, compacting = false, compactionProgress: number | undefined;
+    let observedRevision = 0, decisionRevision = 0, workMs = 0, clockAt = start;
+    let ownerHeld = false, approvalHeld = false, compacting = false, compactionProgress: number | undefined;
     let stopWatchingOwner: (() => void) | undefined;
     function accountTime() {
       const now = Date.now();
-      if (!ownerHeld) { if (compacting) compactionMs += now - clockAt; else workMs += now - clockAt; }
+      if (!ownerHeld && !approvalHeld && !compacting) workMs += now - clockAt;
       clockAt = now;
     }
     const armWorkTimer = () => {
       clearTimeout(timer); accountTime();
-      if (ownerHeld || signal.aborted) return;
-      const remaining = compacting ? 600000 - compactionMs : budgetMs - workMs;
-      timer = setTimeout(() => timeout.abort(new Error(compacting ? "Task exceeded its 600-second context maintenance budget" : `Task exceeded its ${Math.round(budgetMs / 1000)}-second execution budget`)), Math.max(0, remaining));
+      if (ownerHeld || approvalHeld || compacting || signal.aborted || budgetMs === undefined) return;
+      const remaining = budgetMs - workMs;
+      timer = setTimeout(() => timeout.abort(new Error(`Task exceeded its configured ${Math.round(budgetMs / 1000)}-second execution budget`)), Math.max(0, remaining));
     };
     const usage = { input: 0, output: 0 };
     let hasUsage = false, toolCalls = 0, toolErrors = 0;
@@ -218,6 +218,12 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
     const effects = new Map<string, string>();
     const deniedEffects = new Set<string>();
     function addUsage(value: ChatResponse): void { if (value.usage) { hasUsage = true; usage.input += value.usage.input; usage.output += value.usage.output; } }
+
+    async function approveAction(detail: string) {
+      accountTime(); approvalHeld = true; armWorkTimer();
+      try { await approve(run, detail, signal); }
+      finally { accountTime(); approvalHeld = false; armWorkTimer(); }
+    }
 
     async function waitForOwner() {
       if (!workspace || !workspaceView.blocked(workspace)) return;
@@ -252,7 +258,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
         {
           const key = digest({ name, args });
           if (deniedEffects.has(key)) throw new InputError("This MCP action was denied and will not be re-asked", 403);
-          try { await approve(run, `MCP action: ${extension.server} / ${extension.originalName}\n${JSON.stringify(args, null, 2).slice(0, 8000)}`, signal); }
+          try { await approveAction( `MCP action: ${extension.server} / ${extension.originalName}\n${JSON.stringify(args, null, 2).slice(0, 8000)}`); }
           catch (error) { deniedEffects.add(key); throw error; }
         }
         const result = await mcp.call(extension, args, signal);
@@ -314,7 +320,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
         const digestKey = digest({ name, purpose });
         if (deniedEffects.has(digestKey)) throw new InputError("You already denied this exact action; it will not be re-asked in this run.", 403);
         try {
-          await approve(run, `Allow this task to control a separate Linux desktop for: ${purpose}\nThis grants navigation, observation, clicking and typing in this workspace for the current task. It uses host networking and a disposable browser profile. The desktop alone is not a filesystem security boundary. It will be stopped when the task ends.`, signal);
+          await approveAction( `Allow this task to control a separate Linux desktop for: ${purpose}\nThis grants navigation, observation, clicking and typing in this workspace for the current task. It uses host networking and a disposable browser profile. The desktop alone is not a filesystem security boundary. It will be stopped when the task ends.`);
         } catch (cause) {
           deniedEffects.add(digestKey);
           throw cause;
@@ -353,7 +359,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
         if (!Array.isArray(argv) || argv.length > 50 || argv.some((arg) => typeof arg !== "string" || arg.length > 2000 || arg.includes("\0"))) throw new InputError("Arguments must be an array of at most 50 strings");
         const key = digest({ name, command, argv });
         if (deniedEffects.has(key)) throw new InputError("This application launch was already denied", 403);
-        try { await approve(run, `Launch in workspace ${workspace}\nExecutable: ${command}\nArguments: ${JSON.stringify(argv)}\nThis runs application code under your Linux account inside the task desktop.`, signal); }
+        try { await approveAction( `Launch in workspace ${workspace}\nExecutable: ${command}\nArguments: ${JSON.stringify(argv)}\nThis runs application code under your Linux account inside the task desktop.`); }
         catch (error) { deniedEffects.add(key); throw error; }
         signal.throwIfAborted();
         return JSON.parse(await computer.launch(command, argv, { id: workspace, name: args.name === undefined ? undefined : requiredText(args.name, "App name", 100) }));
@@ -362,7 +368,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
         if (args.external === true) {
           const key = digest({ name, args });
           if (deniedEffects.has(key)) throw new InputError("This action was already denied", 403);
-          try { await approve(run, `External action in workspace ${workspace}\n${JSON.stringify(args, null, 2)}`, signal); }
+          try { await approveAction( `External action in workspace ${workspace}\n${JSON.stringify(args, null, 2)}`); }
           catch (error) { deniedEffects.add(key); throw error; }
         }
         switch (args.action) {

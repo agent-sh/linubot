@@ -1,7 +1,10 @@
 # Updates
 
 Linubot checks the project's latest stable GitHub release on startup and every
-six hours while the interface is open. A newer version appears as **Upgrade to
+15 minutes while the interface is open, and when you return to the app.
+Settings also has **Check for updates**, the installed version, last check time
+and any connection error. Foreground/manual checks are limited to once a minute.
+Failed background checks retry after a minute. A newer version appears as **Upgrade to
 VERSION** in the sidebar when a matching Linux archive and checksum file are
 available. Drafts and prereleases are excluded.
 

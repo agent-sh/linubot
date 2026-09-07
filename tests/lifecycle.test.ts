@@ -125,3 +125,47 @@ it("an invalid staged skill leaves no installed target and does not block retrie
   assert.equal(existsSync(join(directory, "skills/empty")), false);
   assert.throws(() => installRemoteSkill(preview.id), /Invalid or empty/);
 });
+
+it("approval waiting pauses the execution budget until the owner decides", async (t) => {
+  const profile = mkdtempSync(join(tmpdir(), "linubot-approval-clock-")), priorData = process.env.LINUBOT_DATA;
+  process.env.LINUBOT_DATA = profile;
+  setProvider({ kind: "openai-compat", baseUrl: "https://fixture.example/v1", model: "fixture", apiKey: "fixture-key" }); createBot("ApprovalClock");
+  const id = "linubot-12345678-1234-4234-8234-123456789abc";
+  const computer = { owns: (value: string) => value === id, start: async () => ({ id }), stop: async () => {}, cleanup: async () => {} };
+  let ready!: (event: FeedEvent) => void, modelSignal: AbortSignal | undefined, calls = 0;
+  const pending = new Promise<FeedEvent>((resolve) => { ready = resolve; });
+  const runtime = createAgentRuntime({ timeoutMs: 100, computer: computer as never, review: false, complete: async (_provider, _messages, _tools, signal) => {
+    modelSignal = signal;
+    return ++calls === 1 ? { text: "", toolCalls: [{ id: "start", name: "start_workspace", arguments: '{"purpose":"Approval timer fixture"}' }] } : { text: "Approved work completed", toolCalls: [] };
+  } });
+  const listener = (scope: string, event: FeedEvent) => { if (scope === "bot:ApprovalClock" && event.kind === "approval" && event.status === "pending") ready(event); };
+  bus.on("event", listener);
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  try {
+    const [run] = runtime.enqueue({ scope: "bot:ApprovalClock", message: "Use the computer" });
+    const approval = await pending;
+    t.mock.timers.tick(600000);
+    assert.equal(modelSignal?.aborted, false);
+    runtime.decide("bot:ApprovalClock", approval.seq, "approved");
+    const result = await runtime.wait(run.id);
+    assert.equal(result.status, "completed", result.error ?? "Approved work should complete"); assert.equal(result.response, "Approved work completed");
+  } finally { bus.off("event", listener); await runtime.close(); t.mock.timers.reset(); process.env.LINUBOT_DATA = priorData; rmSync(profile, { recursive: true, force: true }); }
+});
+
+it("normal tasks can exceed ten minutes and remain stoppable", async (t) => {
+  const profile = mkdtempSync(join(tmpdir(), "linubot-long-task-")), priorData = process.env.LINUBOT_DATA;
+  process.env.LINUBOT_DATA = profile;
+  setProvider({ kind: "openai-compat", baseUrl: "https://fixture.example/v1", model: "fixture", apiKey: "fixture-key" }); createBot("LongTask");
+  let started!: () => void, finish!: () => void, currentSignal: AbortSignal | undefined;
+  const entered = new Promise<void>((resolve) => { started = resolve; });
+  const hold = new Promise<void>((resolve) => { finish = resolve; });
+  const runtime = createAgentRuntime({ review: false, complete: async (_provider, _messages, _tools, signal) => { currentSignal = signal; started(); await hold; signal.throwIfAborted(); return { text: "Long work completed", toolCalls: [] }; } });
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: Date.now() });
+  try {
+    const [run] = runtime.enqueue({ scope: "bot:LongTask", message: "Do the long task" }); await entered;
+    t.mock.timers.tick(60 * 60000);
+    assert.equal(currentSignal?.aborted, false);
+    runtime.stop("bot:LongTask"); assert.equal(currentSignal?.aborted, true);
+    finish(); assert.equal((await runtime.wait(run.id)).status, "cancelled");
+  } finally { finish(); await runtime.close(); t.mock.timers.reset(); process.env.LINUBOT_DATA = priorData; rmSync(profile, { recursive: true, force: true }); }
+});
