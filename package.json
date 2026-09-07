@@ -1,7 +1,7 @@
 {
   "name": "linubot",
   "private": true,
-  "version": "2.9.0",
+  "version": "2.10.0",
   "description": "A self-hosted Linux team of AI coworkers with web access and owned computer workspaces",
   "type": "module",
   "scripts": {
@@ -35,7 +35,7 @@
     "ipaddr.js": "2.5.0",
     "linkedom": "0.18.13",
     "qrcode": "^1.5.4",
-    "yaml": "2.9.0"
+    "yaml": "2.10.0"
   },
   "main": "desktop/main.cjs",
   "author": {

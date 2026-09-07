@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 : "${LINUBOT_ANDROID_KEYSTORE:?Set LINUBOT_ANDROID_KEYSTORE to your private release keystore}"
 : "${LINUBOT_ANDROID_STORE_PASSWORD:?Set LINUBOT_ANDROID_STORE_PASSWORD for the release keystore}"
 linubot_tools="$ANDROID_HOME/build-tools/36.0.0"
-android/gradlew -p android :app:assembleRelease :app:lintRelease
+android/gradlew -p android :app:testDebugUnitTest :app:assembleRelease :app:lintRelease
 linubot_version=$(node -p 'JSON.parse(require("fs").readFileSync("package.json")).version')
 mkdir -p release
 linubot_apk="release/linubot-$linubot_version-android.apk"

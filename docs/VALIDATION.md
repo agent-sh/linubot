@@ -4,6 +4,21 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.10.0
+
+Checked on 2026-09-07: 330 source tests, eight packaged desktop scenarios,
+and Android QR unit tests/build/lint passed.
+
+Source synchronization tests cover new messages, changed knowledge, repeated
+requests, legacy imports, local conflicts, stale previews, active-work rejection,
+rollback before broadcast, and Grok group speaker mapping. Desktop QA syncs a
+new source message and memory update, then verifies an empty second pull.
+
+Android unit tests decode the existing pairing QR format and reject unrelated,
+insecure and credential-bearing links. Emulator QA verifies the Scan QR code
+control, camera permission and scanner camera preview. Physical-phone camera
+scanning remains an owner acceptance check.
+
 ## Release acceptance: 2.9.0
 
 Checked on 2026-09-07: 321 source tests, eight source and packaged desktop

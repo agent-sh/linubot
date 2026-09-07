@@ -15,7 +15,7 @@ export const sourceId = (value: string) => createHash("sha256").update(value).di
 export function importName(value: string, fallback = "Imported"): string { return value.normalize("NFKD").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 32) || fallback; }
 export interface ImportCandidate { id: string; source: "hermes" | "grok"; name: string; description: string; kind: "bot" | "group"; location: string; exported?: boolean }
 interface SourceRef extends ImportCandidate { root: string; row?: RecordValue; account?: string; members?: string[] }
-export interface ImportedMessage { role: "user" | "assistant"; text: string; at?: string; author?: string; authorName?: string }
+export interface ImportedMessage { key?: string; role: "user" | "assistant"; text: string; at?: string; author?: string; authorName?: string }
 export interface ImportedSkill { key: string; name: string; description: string; body: string; files: { path: string; bytes: Buffer }[] }
 export interface ImportedRoutine { name: string; schedule: string; prompt: string }
 export interface SourceBot { candidate: ImportCandidate; soul: string; context: string; model: string; provider: string; skills: ImportedSkill[]; routines: ImportedRoutine[]; messages: ImportedMessage[]; warnings: string[] }
@@ -96,7 +96,7 @@ export function createImportSources(roots: ImportRoots = {}) {
       const message = object(entry.message), author = object(entry.author);
       const role = entry.kind === "send-message" ? "assistant" : entry.kind === "message" && ["user", "assistant"].includes(String(entry.role)) ? entry.role as "user" | "assistant" : undefined;
       const body = role ? content(entry.kind === "send-message" && message.type === "text" ? message.content : entry.content) : "";
-      if (role && body.trim()) messages.set(String(entry.id), { role, text: body.slice(0, 100000), at: timestamp(entry.timestampMs), ...(typeof author.id === "string" ? { author: sourceId(`${ref.account}:${author.id}`), authorName: text(author.name, 80) } : {}) });
+      if (role && body.trim()) messages.set(String(entry.id), { key: `grok:${String(entry.id)}`, role, text: body.slice(0, 100000), at: timestamp(entry.timestampMs), ...(typeof author.id === "string" ? { author: sourceId(`${ref.account}:${author.id}`), authorName: text(author.name, 80) } : {}) });
     }
     return [...messages.values()];
   }
@@ -158,8 +158,8 @@ export function createImportSources(roots: ImportRoots = {}) {
         const columns = db.prepare("PRAGMA table_info(messages)").all().map((row) => row.name);
         for (const session of sessions.reverse()) {
           const rows = db.prepare(`SELECT id, role, content, timestamp FROM messages WHERE session_id = ? AND role IN ('user','assistant') ${columns.includes("active") ? "AND active=1" : ""} AND length(content)<=200000 ORDER BY id DESC LIMIT 200`).all(String(session.id));
-          messages.push({ role: "assistant", text: `[Imported Hermes conversation: ${text(session.title, 200) || session.id}. Historical record only; no past request or approval is reactivated.]` });
-          for (const row of rows.reverse()) { const body = content(row.content); if (body.trim()) messages.push({ role: row.role as "user" | "assistant", text: body.slice(0, 100000), at: timestamp(row.timestamp) }); }
+          messages.push({ key: `hermes-session:${session.id}`, role: "assistant", text: `[Imported Hermes conversation: ${text(session.title, 200) || session.id}. Historical record only; no past request or approval is reactivated.]` });
+          for (const row of rows.reverse()) { const body = content(row.content); if (body.trim()) messages.push({ key: `hermes:${session.id}:${row.id}`, role: row.role as "user" | "assistant", text: body.slice(0, 100000), at: timestamp(row.timestamp) }); }
           if (rows.length === 200) warnings.push("A conversation was limited to its latest 200 visible messages.");
         }
         warnings.push("History includes up to three recent conversations. Other Hermes sessions stay in Hermes.");

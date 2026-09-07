@@ -14,8 +14,10 @@ Linubot must be running and the Linux computer must be awake and online.
    The code works once and expires after five minutes.
 4. For the Android app, download `linubot-VERSION-android.apk` from the
    [release page](https://github.com/agent-sh/linubot/releases/latest), install it,
-   and enter the HTTPS computer address shown in Settings. Enter a fresh pairing
-   code in the app. If the code was already used in a browser, create another.
+   and choose **Scan QR code** on its connection screen. Allow camera access and
+   scan the QR displayed by Linux. Confirm the computer address, then finish
+   pairing. Manual URL/code entry remains available. **Connection → Scan QR code**
+   also works when the app already has a saved address. If the code was already used in a browser, create another.
 
 The Android APK is distributed directly from GitHub, not through Google Play.
 Android may ask you to allow installation from the browser or file manager you
@@ -46,6 +48,11 @@ Paired devices cannot create pairing codes or manage other devices remotely.
 Changing the HTTPS address clears existing pairings. Paired-device metadata lives
 in `phone-devices.json` and gateway settings in `phone-access.json`, inside the
 private Linubot data directory. App upgrades preserve these files.
+
+The scanner is bundled in the APK and needs no external scanner app or Play
+Services download. Camera access is requested when you choose Scan QR code; images
+are decoded locally. Only HTTPS Linubot pairing links with the expected path and
+code format are accepted, and the app shows the destination before connecting.
 
 The Android app accepts HTTPS only, rejects invalid certificates, does not use a
 JavaScript/native bridge, and keeps external sites in the system browser. Its

@@ -65,4 +65,4 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - run: android/gradlew -p android :app:assembleRelease :app:lintRelease
+      - run: android/gradlew -p android :app:testDebugUnitTest :app:assembleRelease :app:lintRelease
