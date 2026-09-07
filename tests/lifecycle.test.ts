@@ -148,7 +148,7 @@ it("approval waiting pauses the execution budget until the owner decides", async
     assert.equal(modelSignal?.aborted, false);
     runtime.decide("bot:ApprovalClock", approval.seq, "approved");
     const result = await runtime.wait(run.id);
-    assert.equal(result.status, "completed", result.error); assert.equal(result.response, "Approved work completed");
+    assert.equal(result.status, "completed", result.error ?? "Approved work should complete"); assert.equal(result.response, "Approved work completed");
   } finally { bus.off("event", listener); await runtime.close(); t.mock.timers.reset(); process.env.LINUBOT_DATA = priorData; rmSync(profile, { recursive: true, force: true }); }
 });
 
