@@ -6,7 +6,7 @@ not establish a provider account's current access or a model's correctness.
 
 ## Release acceptance: 2.7.1
 
-Checked on 2026-09-07: 296 source tests and five desktop scenarios passed
+Checked on 2026-09-07: 297 source tests and five desktop scenarios passed
 from both source and the packaged executable.
 Update checks cover manual discovery, foreground refresh, retry timing and
 coalesced requests. Virtual-clock tests verify that approval waiting does not
