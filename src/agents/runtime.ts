@@ -99,6 +99,7 @@ export function agentTools(allowMemoryWrites = true): ToolDefinition[] {
     { name: "start_workspace", description: "Ask the owner for permission to create a separate linubot-owned Linux desktop for this task. It will be closed when the task ends. No host desktop or shell control.", parameters: schema({ purpose: text }, ["purpose"]) },
     { name: "request_user_control", description: "Ask the user to sign in or complete a private step in the embedded computer panel. Waits until they take control and return it. Never ask for their password in chat. Returns a fresh observation when they finish.", parameters: schema({ reason: text }, ["reason"]) },
     { name: "observe_workspace", description: "Inspect this task's workspace, including a current screenshot and browser text when open. Cannot access other workspaces.", parameters: schema({}) },
+    { name: "open_sign_in_browser", description: "Open a regular browser without remote automation in the approved workspace for sites that reject automated sign-in. Use the destination website URL, then request_user_control for the user to sign in. Continue using screenshots and workspace_action; existing automated-browser cookies are separate. Sign-in is not guaranteed by the site.", parameters: schema({ url: text }, ["url"]) },
     { name: "browse_workspace", description: "Open an http(s) URL in this task's approved browser, read the page, and take a screenshot. Use workspace_action to interact.", parameters: schema({ url: text }, ["url"]) },
   ];
 }
@@ -243,10 +244,12 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
       pendingWorkspaceImage = [{ mimeType: "image/png", data: readFileSync(path).toString("base64") }];
       emit(run, { kind: "file", name: "Workspace screenshot", path: `/api/screenshots/${id}`, text: "Observed workspace state" });
       const windows = JSON.parse(await computer.windows(workspace));
-      const browser = browserOpen ? JSON.parse(await computer.browserSnapshot(workspace)) : undefined;
+      const standardBrowser = workspaceView.status(workspace).standardBrowser;
+      const browser = browserOpen && !standardBrowser ? JSON.parse(await computer.browserSnapshot(workspace)) : undefined;
       const page = browser?.browser_snapshot?.page ?? browser?.page ?? browser;
       observedRevision = observationRevision;
       return { workspace, screenshot: `/api/screenshots/${id}`, windows: (windows.windows ?? []).map((window: Record<string, unknown>) => ({ id: window.id, title: window.title, geometry: window.geometry })),
+        ...(standardBrowser ? { browser: { mode: "standard", interaction: "Use the screenshot and workspace_action. Browser text extraction is disabled. Ask the user to complete private sign-in through request_user_control." } } : {}),
         ...(page ? { browser: { title: page.title, url: page.url, text: typeof page.text === "string" ? page.text.slice(0, 12000) : undefined, links: page.links?.slice(0, 20) } } : {}) };
     }
 
@@ -342,10 +345,15 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
         return workspaceView.agent(workspace, undefined, signal, snapshot);
       }
       if (name === "observe_workspace") return snapshot();
-      if (name === "browse_workspace") {
+      if (name === "browse_workspace" || name === "open_sign_in_browser") {
         const url = new URL(requiredText(args.url, "Browser URL", 2000));
         if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new InputError("Only credential-free http(s) browsing is allowed");
         signal.throwIfAborted();
+        if (name === "open_sign_in_browser" || workspaceView.status(workspace).standardBrowser) {
+          await computer.openSignInBrowser(url.href, workspace, { signal });
+          workspaceView.useStandardBrowser(workspace);
+          return snapshot();
+        }
         if (!browserOpen) { await computer.openBrowser(workspace); browserOpen = true; }
         signal.throwIfAborted();
         await computer.browserNavigate(url.href, workspace);
@@ -476,7 +484,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
             if (!extensionTools.some((tool) => tool.name === call.name) && Object.keys(args).some((key) => !Object.hasOwn(fields, key))) throw new InputError("Unexpected tool arguments");
             const key = digest({ name: call.name, args });
             await waitForOwner();
-            const computerTool = ["observe_workspace", "browse_workspace", "workspace_action", "launch_workspace_app", "read_workspace_log"].includes(call.name);
+            const computerTool = ["observe_workspace", "browse_workspace", "open_sign_in_browser", "workspace_action", "launch_workspace_app", "read_workspace_log"].includes(call.name);
             result = effects.get(key) ?? JSON.stringify(await (workspace && computerTool
               ? workspaceView.agent(workspace, call.name === "observe_workspace" ? undefined : decisionRevision, signal, () => callTool(call.name, args))
               : callTool(call.name, args)));

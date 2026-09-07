@@ -16,6 +16,7 @@ interface Control {
   input: Promise<void>;
   pendingInput: number;
   clipboardDirty?: boolean;
+  standardBrowser?: boolean;
   frame?: Promise<Buffer>;
   closed?: boolean;
   abort: AbortController;
@@ -56,7 +57,8 @@ export function createWorkspaceView(computer: ReturnType<typeof createComputer>)
   }
   return {
     subscribe(id: string, listener: (blocked: boolean) => void) { const entry = state(id); entry.listeners.add(listener); listener(Boolean(entry.token || entry.requested)); return () => entry.listeners.delete(listener); },
-    status(id: string) { const entry = state(id); return { manual: Boolean(entry.token), requested: entry.requested, revision: entry.revision }; },
+    useStandardBrowser(id: string) { state(id).standardBrowser = true; },
+    status(id: string) { const entry = state(id); return { manual: Boolean(entry.token), requested: entry.requested, revision: entry.revision, standardBrowser: Boolean(entry.standardBrowser) }; },
     busy: () => [...controls.values()].some((entry) => Boolean(entry.token || entry.requested || entry.pendingInput)),
     revision: (id: string) => state(id).revision,
     blocked: (id: string) => { const entry = state(id); return Boolean(entry.token || entry.requested); },
@@ -118,6 +120,9 @@ export function createWorkspaceView(computer: ReturnType<typeof createComputer>)
         if (entry.closed || entry.token !== token) throw new InputError("This control session ended", 409);
         try {
           switch (action.action) {
+            case "sign-in-browser":
+              await computer.openSignInBrowser(action.url as string, id, { signal: entry.abort.signal, timeoutMs: 15000 });
+              entry.standardBrowser = true; entry.revision++; break;
             case "click": await computer.click(action.x as number, action.y as number, id, { button: action.button as number | undefined, signal: entry.abort.signal, timeoutMs: 5000 }); break;
             case "drag": await computer.drag(action.fromX as number, action.fromY as number, action.toX as number, action.toY as number, id, { signal: entry.abort.signal, timeoutMs: 5000 }); break;
             case "paste":

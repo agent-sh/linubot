@@ -44,7 +44,7 @@ Linubot, so the running app does not keep that lock and block later upgrades.
 To pin a release instead of selecting the latest:
 
 ```sh
-bash /tmp/linubot-install.sh --version 2.7.1 --launch
+bash /tmp/linubot-install.sh --version 2.7.2 --launch
 ```
 
 The sidebar offers upgrades when a newer suitable release exists. See
@@ -83,7 +83,7 @@ have additional prerequisites below.
 The installer can also build a tagged release:
 
 ```sh
-bash /tmp/linubot-install.sh --version 2.7.1 --build --launch
+bash /tmp/linubot-install.sh --version 2.7.2 --build --launch
 ```
 
 This needs Git, Node.js 24+, npm and the Electron GUI libraries. It builds the
@@ -151,7 +151,7 @@ and an unpacked application at `release/linux-unpacked/linubot`. Install a
 specific built installer with your package manager:
 
 ```sh
-sudo apt install ./release/linubot-2.7.1-amd64.deb
+sudo apt install ./release/linubot-2.7.2-amd64.deb
 ```
 
 For a user installation with versioned directories, use the release installer

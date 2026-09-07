@@ -21,7 +21,7 @@ export function computerKey(event) {
 export function computerPanel(ctx, button, beforeOpen) {
   const layout = ctx.root.querySelector(".chat-layout"), panel = document.createElement("aside");
   panel.className = "computer-panel"; panel.hidden = true; panel.setAttribute("aria-label", "Bot computer");
-  panel.innerHTML = `<div class="section-heading"><h2>Computer</h2><div class="actions"><button type="button" class="small subtle" data-expand aria-pressed="false">Expand</button><button type="button" class="icon-button" data-close aria-label="Close computer">${icon("close")}</button></div></div><label class="sr-only" for="computer-select">Workspace</label><select id="computer-select" data-select></select><p class="field-hint" data-state role="status"></p><div class="computer-screen"><img alt="Live view of the bot’s separate computer" draggable="false" tabindex="-1" data-screen hidden><p class="quiet-empty" data-empty>No computer is open for this conversation. Ask the bot to open a browser or use its computer.</p></div><div class="computer-controls"><button type="button" class="primary" data-take disabled>Take control</button><button type="button" class="primary" data-return hidden>Return to bot</button><button type="button" class="small" data-paste hidden>Paste text</button></div><p class="field-hint" data-hint>Watch here, or take control to sign in yourself. Closing the view leaves the task running.</p><div data-feedback hidden></div>`;
+  panel.innerHTML = `<div class="section-heading"><h2>Computer</h2><div class="actions"><button type="button" class="small subtle" data-expand aria-pressed="false">Expand</button><button type="button" class="icon-button" data-close aria-label="Close computer">${icon("close")}</button></div></div><label class="sr-only" for="computer-select">Workspace</label><select id="computer-select" data-select></select><p class="field-hint" data-state role="status"></p><div class="computer-screen"><img alt="Live view of the bot’s separate computer" draggable="false" tabindex="-1" data-screen hidden><p class="quiet-empty" data-empty>No computer is open for this conversation. Ask the bot to open a browser or use its computer.</p></div><div class="computer-controls"><button type="button" class="primary" data-take disabled>Take control</button><button type="button" class="primary" data-return hidden>Return to bot</button><button type="button" class="small" data-paste hidden>Paste text</button><button type="button" class="small" data-sign-in hidden>Open sign-in browser</button></div><p class="field-hint" data-hint>Watch here, or take control to sign in yourself. Closing the view leaves the task running.</p><div data-feedback hidden></div>`;
   layout.append(panel);
   const screen = panel.querySelector("[data-screen]"), select = panel.querySelector("[data-select]"), take = panel.querySelector("[data-take]"), giveBack = panel.querySelector("[data-return]");
   let entries = [], selected = "", token, frameTimer, statusTimer, imageUrl, frameController, openingController, disposed = false, sequence = 0, frameReady = false, frameLoadedAt = 0, frameExpiry, inputQueue = Promise.resolve(), pendingInputs = 0;
@@ -33,6 +33,8 @@ export function computerPanel(ctx, button, beforeOpen) {
     take.disabled = !current || Boolean(openingController);
     take.hidden = Boolean(token); giveBack.hidden = !token;
     panel.querySelector("[data-paste]").hidden = !token;
+    panel.querySelector("[data-sign-in]").hidden = !token;
+    panel.querySelector("[data-sign-in]").disabled = !frameReady;
     select.disabled = Boolean(token) || Boolean(openingController);
     screen.tabIndex = token && frameReady ? 0 : -1;
     screen.classList.toggle("controlling", Boolean(token && frameReady));
@@ -172,6 +174,15 @@ export function computerPanel(ctx, button, beforeOpen) {
     event.preventDefault(); const point = screenPoint(event, screen);
     if (point) sendInput({ action: "scroll", ...point, direction: event.deltaY < 0 ? "up" : "down", amount: Math.min(6, Math.max(1, Math.ceil(Math.abs(event.deltaY) / 100))) });
   }, { passive: false });
+  panel.querySelector("[data-sign-in]").onclick = () => {
+    const modal = dialog("Open sign-in browser", '<p>Open the website you want to use, then sign in yourself. This regular browser stays in the bot’s computer. The bot continues from its screen after you return control.</p><form><label>Website URL<input name="url" type="url" placeholder="https://example.com" required></label><p class="field-hint">Use this when a site rejects the automated browser. Your main browser’s accounts are separate. The site may still restrict sign-in.</p><button type="submit" class="primary">Open website</button><div data-feedback hidden></div></form>');
+    submit(modal.root.querySelector("form"), async (form) => {
+      const url = new URL(form.get("url"));
+      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Enter an http(s) website URL without credentials.");
+      await input({ action: "sign-in-browser", url: url.href });
+      if (modal.alive()) modal.close();
+    });
+  };
   panel.querySelector("[data-paste]").onclick = () => {
     const modal = dialog("Paste into the computer", '<form><label>Text<textarea name="text" rows="4" maxlength="16000" spellcheck="false" autocomplete="off" autofocus></textarea></label><p class="field-hint">This is typed into the workspace, without adding it to the conversation.</p><div data-feedback hidden></div><div class="form-actions"><button type="submit" class="primary">Paste into computer</button></div></form>');
     submit(modal.root.querySelector("form"), async (data) => { await input({ action: "paste", text: data.get("text") }); if (modal.alive()) modal.close(); screen.focus(); });

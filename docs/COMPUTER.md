@@ -41,6 +41,26 @@ the temporary workspace clipboard used for pasted text is cleared, and the bot
 then observes the current screen. Those subsequent observations can
 be retained in its normal task activity and sent to the selected model.
 
+### When a site rejects sign-in
+
+Some sites, including Google, can reject automated browsers even during manual
+control. Take control and choose **Open sign-in browser**, then enter the
+website you want to use. This opens regular Chrome/Chromium in the same computer
+without remote debugging. Sign in yourself and return control. The bot then
+uses screenshots, clicking and typing in that browser; it does not continue
+reading the older automated tab. Bots can also choose `open_sign_in_browser`
+before asking you to sign in.
+
+The regular browser has a separate profile from your main desktop and the
+automated browser. Open the destination website first if it uses “Sign in with
+Google”; existing tabs and cookies are not transferred. Its cookies survive
+within the task, and its profile is removed when the task is cleaned up.
+
+This removes Linubot's remote browser automation from that browser. It does not
+guarantee that a site will accept a login: account, device and organization
+restrictions still apply. See [Google's supported-browser guidance](https://support.google.com/accounts/answer/7675428).
+For provider connections, use the supported browser OAuth flow in Settings.
+
 Tasks have no default overall time deadline. If an explicit execution budget is
 configured by an embedding caller, approval waiting, manual control and context
 maintenance do not consume it. Individual model and tool requests retain their
