@@ -516,3 +516,22 @@ dialog::backdrop { background: #202a2573; }
 .grow { flex: 1; }
 @keyframes row-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .catalog-row { animation: none; } }
+
+/* The computer view stays beside the conversation and captures input only after takeover. */
+.chat-layout.computer-open { grid-template-columns: minmax(260px, 1fr) minmax(380px, 52%); }
+.computer-panel { min-width: 0; overflow: auto; padding: 18px; border-left: 1px solid var(--line, #deded6); background: var(--paper, #faf9f5); }
+.computer-panel .section-heading h2 { font-size: 20px; }
+.computer-panel select { width: 100%; }
+.computer-screen { display: flex; align-items: center; justify-content: center; min-height: 220px; background: #152629; border-radius: 8px; overflow: hidden; margin: 14px 0; }
+.computer-screen img { display: block; width: 100%; max-height: calc(100vh - 300px); object-fit: contain; outline-offset: -3px; }
+.computer-screen img.controlling { cursor: crosshair; outline: 3px solid #0f766e; }
+.computer-screen .quiet-empty { color: #e2e8e3; padding: 24px; }
+.computer-controls { display: flex; gap: 8px; flex-wrap: wrap; }
+.computer-panel.wide { position: fixed; inset: 42px 20px 20px; z-index: 80; border: 1px solid #d5dcd5; border-radius: 12px; box-shadow: 0 12px 48px #132c2840; }
+.computer-panel.wide .computer-screen { height: calc(100% - 180px); }
+.computer-panel.wide .computer-screen img { width: 100%; height: 100%; max-height: none; }
+[data-computer-toggle].needs-attention { background: #f8e2bc; color: #583b0d; }
+@media (max-width: 1050px) {
+  .chat-layout.computer-open { grid-template-columns: minmax(0, 1fr); }
+  .computer-panel:not([hidden]) { position: fixed; inset: 70px 12px 12px; z-index: 70; border: 1px solid #d5dcd5; border-radius: 12px; box-shadow: 0 12px 48px #132c2840; }
+}

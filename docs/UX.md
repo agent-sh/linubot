@@ -23,6 +23,35 @@ The composer leads with the message and Send. Criteria, full-message saving, and
 queue/redirect controls sit inside Message options. A successful send is clear
 from the conversation itself; it does not leave a persistent success banner.
 
+## The bot's computer
+
+The **Computer** button in a bot or group conversation opens a closable sidebar.
+It starts in watch mode. **Expand** gives the screen more room without leaving
+the conversation.
+
+**Take control** pauses the bot and waits for a fresh view before accepting
+pointer, keyboard, paste, scroll or drag input. The bot can also request a
+private login step; the request stays visible until the user handles it.
+Passwords belong in the workspace's login page, never in chat.
+
+**Return to bot** resumes work from the current screen. Closing the panel returns
+control and leaves the task running. Live viewer frames and manual input are
+not added as user messages; the bot's subsequent observations use its normal
+activity history. Workspaces remain scoped to the task and close when it ends.
+See [computer controls](COMPUTER.md) for the full flow and privacy boundary.
+
+## Deleting a bot
+
+**Bot options → Delete bot** is available directly from the conversation.
+The confirmation previews the impact on groups and routines. Confirming removes
+the bot's profile and instructions, detaches it from groups, deletes affected
+routines and removes any groups left empty. Past messages and shared team memory
+remain.
+
+Deletion is blocked while the bot has active or queued work, including group
+turns, or while a routine is delivering to that bot or a group that would be
+removed. Finish or stop the affected work before trying again.
+
 ## Background activity
 
 Tools, observable stages and workspace screenshots fold into expandable activity

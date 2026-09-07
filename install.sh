@@ -15,7 +15,7 @@ while [ "$#" -gt 0 ]; do
     --stage-only) linubot_stage=1; shift ;;
     --activate-only) linubot_activate=1; shift ;;
     --launch) linubot_relaunch=1; shift ;;
-    --help) echo 'Usage: bash install.sh [--version 2.6.0] [--build] [--launch]'; exit 0 ;;
+    --help) echo 'Usage: bash install.sh [--version 2.7.0] [--build] [--launch]'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
@@ -116,6 +116,14 @@ linubot_launcher=${linubot_launcher//\\/\\\\}
 linubot_launcher=${linubot_launcher//\"/\\\"}
 linubot_launcher=${linubot_launcher//\$/\\\$}
 linubot_launcher=${linubot_launcher//\`/\\\`}
-printf '[Desktop Entry]\nName=Linubot\nComment=Your local AI team\nExec="%s"\nIcon=linubot\nType=Application\nCategories=Utility;\nStartupWMClass=linubot\nTerminal=false\n' "$linubot_launcher" > "$HOME/.local/share/applications/linubot.desktop"
+linubot_icon="$HOME/.local/share/icons/hicolor/512x512/apps/linubot.png"
+linubot_icon=${linubot_icon//\\/\\\\}
+printf '[Desktop Entry]\nName=Linubot\nComment=Your local AI team\nExec="%s"\nIcon=%s\nType=Application\nCategories=Utility;\nStartupWMClass=linubot\nTerminal=false\n' "$linubot_launcher" "$linubot_icon" > "$HOME/.local/share/applications/linubot.desktop"
+# Refresh discovery where the desktop utilities are available. The explicit icon path also works without a theme cache.
+if command -v gtk-update-icon-cache >/dev/null; then gtk-update-icon-cache --force --ignore-theme-index "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true; fi
+if command -v update-desktop-database >/dev/null; then update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true; fi
 echo "Installed Linubot $linubot_version. Open Linubot from your applications menu."
+# Do not let the launched app inherit the installation lock for its whole lifetime.
+flock -u 9
+exec 9>&-
 if [ "$linubot_relaunch" = 1 ]; then nohup "$HOME/.local/bin/linubot" >/dev/null 2>&1 </dev/null & fi

@@ -52,7 +52,9 @@ read the selected endpoint's catalog, with custom IDs available when needed.
   sites in an owned workspace. Search providers are configurable.
 - **Use a computer:** work in a separate Linux display through
   [agent-workspace-linux](https://github.com/agent-sh/agent-workspace-linux).
-  Approve access, see activity and stop the task at any time.
+  Open **Computer** inside a bot or group conversation to watch, expand the view
+  or take control for a private sign-in. **Return to bot** resumes its work from
+  the updated screen. See [computer controls](docs/COMPUTER.md).
 - **Connect tools and skills:** discover remote MCP servers, configure custom
   tools, and preview skills from online catalogs, GitHub or local folders.
 - **Remember useful details:** bots can save, correct and forget shared facts
@@ -75,6 +77,10 @@ Settings contains provider connections, web search, connected tools and long
 conversation budgets. A bot's options select its connection, model and skills.
 Advanced contains memory, routines, demonstrations and evaluations.
 
+**Bot options → Delete bot** previews the effects on groups and routines before
+confirmation. Past messages and shared team memory are retained. See
+[bot management](docs/UX.md#deleting-a-bot).
+
 When a newer release is available, **Upgrade to …** appears in the sidebar.
 Managed user installs can download, verify and restart after confirmation;
 other installs open the release page. See [updates](docs/UPDATES.md).
@@ -93,6 +99,9 @@ those environments need their own dependency and behavior checks.
 An owned desktop separates display and input. It is not, by itself, a filesystem
 security boundary. Executable tools run under your Linux account. Review the
 [security model](SECURITY.md) before granting access.
+
+Workspaces and their disposable browsers belong to the current task and close
+when it ends. Browser sign-ins are not promised to persist across tasks.
 
 Grok Bot imports contain only locally cached data; cloud instructions, memory,
 skills, schedules and files are unavailable. Hermes imports also have bounded

@@ -1,3 +1,4 @@
+import { createWorkspaceView } from "./computer/view.ts";
 import { createUpdates, type Updates } from "./updates.ts";
 import { xaiStatus, importHermesXai, beginXaiLogin, pollXaiLogin, disconnectXai, xaiModels } from "./auth/xai.ts";
 import { timingSafeEqual } from "node:crypto";
@@ -21,7 +22,7 @@ import { createAgentImports } from "./imports/manager.ts";
 import type { ImportRoots } from "./imports/sources.ts";
 import { contextSettings, setContextSettings, contextStatus } from "./context/manager.ts";
 import type { ContextSettings } from "./context/manager.ts";
-import { deleteBot, ensureBot, getBot, listBots, listSections, markRead, readSoul, saveSections, unreadCount, updateBot } from "./bots/manager.ts";
+import { botDeletionPreview, deleteBot, ensureBot, getBot, listBots, listSections, markRead, readSoul, saveSections, unreadCount, updateBot } from "./bots/manager.ts";
 import { writeSoul, readBotContext, writeBotContext } from "./bots/manager.ts";
 import { createGroup, deleteGroup, getGroup, listGroups } from "./chat/session.ts";
 import { createComputer } from "./computer/workspace.ts";
@@ -92,7 +93,8 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   ensureMemoryFiles();
   const computer = options.computer ?? createComputer();
   const mcp = options.mcp ?? createMcpRuntime();
-  const runtime = createAgentRuntime({ ...options, computer, mcp });
+  const workspaceView = options.workspaceView ?? createWorkspaceView(computer);
+  const runtime = createAgentRuntime({ ...options, computer, mcp, workspaceView });
   const openRouter = createOpenRouterLogin({ request: options.openRouterRequest, connected: options.onProviderConnected });
   function oauthConnection(kind: "openai-codex" | "google-oauth", id?: string, model = "") {
     const baseUrl = kind === "openai-codex" ? CODEX_BASE : GOOGLE_BASE;
@@ -113,6 +115,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   let stopping = false, updating = false;
   let jobsRunning: ReturnType<typeof runDue> | undefined;
   let schedulerError: string | undefined;
+  const runningJobs = new Map<string, { bot: string; deliver?: string }>();
 
   function roster() {
     return listBots().map((bot) => ({ ...bot, provider: botProvider(bot), preview: previewOf(`bot:${bot.name}`).slice(0, 140), unread: unreadCount(`bot:${bot.name}`), state: runtime.state(`bot:${bot.name}`) }));
@@ -137,6 +140,8 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   function runJobs() {
     if (jobsRunning) return jobsRunning;
     jobsRunning = runDue(new Date(), async (job) => {
+      runningJobs.set(job.name, job);
+      try {
       const [run] = runtime.enqueue({ scope: `bot:${job.bot}`, message: job.prompt, source: "cron", from: `cron:${job.name}` });
       const result = await runtime.wait(run.id);
       if (result.status !== "completed") throw new Error(result.error || "Routine did not complete");
@@ -146,6 +151,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         appendEvent(destination, { kind: "message", from: job.bot, text: result.response, runId: run.id });
       }
       return `Delivered to ${destination}. Task ${run.id}\n\n${result.response}`;
+      } finally { runningJobs.delete(job.name); }
     }).finally(() => { jobsRunning = undefined; });
     return jobsRunning;
   }
@@ -161,7 +167,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     res.setHeader("x-frame-options", "DENY");
     res.setHeader("referrer-policy", "no-referrer");
     res.setHeader("cache-control", "no-store");
-    res.setHeader("content-security-policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
+    res.setHeader("content-security-policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'");
     try {
       const port = req.socket.localPort;
       const host = req.headers.host;
@@ -255,9 +261,12 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
             pinned: optionalBoolean(b.pinned), skills: b.skills === undefined ? undefined : textList(b.skills, "Skills", 40, 40),
           })); return;
         }
+        if (r[2] === "deletion" && method === "GET") { ok(botDeletionPreview(bot.name)); return; }
         if (r.length === 2 && method === "DELETE") {
-          if (runtime.state(scope) !== "idle") throw new InputError("Stop this teammate's active tasks before deleting it", 409);
-          ok({ deleted: deleteBot(bot.name) }); return;
+          if (runtime.hasBotWork(bot.name)) throw new InputError("Stop this teammate's active tasks before deleting it", 409);
+          const preview = botDeletionPreview(bot.name);
+          if ([...runningJobs.values()].some((job) => job.bot === bot.name || job.deliver === scope || preview.emptyGroups.some((id) => job.deliver === `group:${id}`))) throw new InputError("Wait for routines delivering to this bot or its groups before deleting it", 409);
+          ok({ deleted: deleteBot(bot.name, { detachReferences: optionalBoolean(b.detachReferences) }) }); return;
         }
         if (r[2] === "soul" && method === "PUT") { writeSoul(bot.name, requiredText(b.soul, "Instructions", 100000)); ok({ saved: true }); return; }
         if (r[2] === "imported-context" && method === "PUT") { writeBotContext(bot.name, typeof b.text === "string" ? b.text : requiredText(b.text, "Imported context", 100000)); ok({ saved: true }); return; }
@@ -513,10 +522,33 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         res.writeHead(200, { "content-type": "text/markdown; charset=utf-8", "content-disposition": `attachment; filename="${artifact.filename}"` }); res.end(content); return;
       }
       if (r[0] === "computer") {
+        if (r[1] === "views" && method === "GET") {
+          const scope = url.searchParams.get("scope");
+          ok({ workspaces: computer.owned().filter((entry) => entry.state === "running" && (!scope || !entry.scope || entry.scope === scope)).map((entry) => ({ ...entry, ...workspaceView.status(entry.id) })) }); return;
+        }
+        if (r[1] === "frame" && method === "GET") {
+          const bytes = await workspaceView.frame(requiredText(url.searchParams.get("id"), "Workspace", 80));
+          res.writeHead(200, { "content-type": "image/png", "content-length": bytes.length }); res.end(bytes); return;
+        }
+        if (r[1] === "control" && method === "POST") {
+          const id = requiredText(b.id, "Workspace", 80);
+          if (b.action === "take") {
+            const ctrl = new AbortController(), disconnected = () => { if (!res.writableEnded) ctrl.abort(new Error("Panel closed")); };
+            res.once("close", disconnected);
+            try { ok(await workspaceView.take(id, ctrl.signal)); } finally { res.off("close", disconnected); }
+            return;
+          }
+          if (b.action === "release") { await workspaceView.release(id, requiredText(b.token, "Control session", 80)); ok({ released: true }); return; }
+          throw new InputError("Unknown control action");
+        }
+        if (r[1] === "input" && method === "POST") {
+          await workspaceView.input(requiredText(b.id, "Workspace", 80), requiredText(b.token, "Control session", 80), b);
+          ok({ accepted: true }); return;
+        }
         if (r[1] === "doctor" && method === "GET") { ok({ report: await computer.doctor() }); return; }
         if (r[1] === "list" && method === "GET") { ok({ report: await computer.list() }); return; }
         if (r[1] === "start" && method === "POST") { ok(await computer.start({ purpose: requiredText(b.purpose, "Workspace purpose", 2000), acknowledge: b.acknowledge === true })); return; }
-        if (r[1] === "stop" && method === "POST") { ok({ report: await computer.stop(requiredText(b.id, "Owned workspace ID", 80)) }); return; }
+        if (r[1] === "stop" && method === "POST") { const id = requiredText(b.id, "Owned workspace ID", 80); workspaceView.forget(id); ok({ report: await computer.stop(id) }); return; }
         if (r[1] === "cleanup" && method === "POST") { ok({ report: await computer.cleanup(requiredText(b.id, "Owned workspace ID", 80)) }); return; }
         if (r[1] === "viewer" && method === "POST") { ok({ report: await computer.openViewer(requiredText(b.id, "Owned workspace ID", 80), { inputForwarding: optionalBoolean(b.inputForwarding) }) }); return; }
       }
@@ -560,6 +592,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     stopping = true;
     clearInterval(scheduler);
     evaluations.forEach((controller) => controller.abort(new Error("Server is stopping")));
+    workspaceView.close();
     await runtime.close();
     await openRouter.close();
     await codex.close();

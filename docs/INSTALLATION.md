@@ -36,10 +36,15 @@ Application versions live under `~/.local/opt/linubot-VERSION`, with
 `~/.local/bin/linubot` and an application-menu entry. Earlier version directories
 are retained, and application data stays in its separate location.
 
+The application-menu entry points directly to the installed icon. When desktop
+cache utilities are available, the installer refreshes icon and application
+listings too. It releases the installation lock before `--launch` starts
+Linubot, so the running app does not keep that lock and block later upgrades.
+
 To pin a release instead of selecting the latest:
 
 ```sh
-bash /tmp/linubot-install.sh --version 2.6.1 --launch
+bash /tmp/linubot-install.sh --version 2.7.0 --launch
 ```
 
 The sidebar offers upgrades when a newer suitable release exists. See
@@ -78,7 +83,7 @@ have additional prerequisites below.
 The installer can also build a tagged release:
 
 ```sh
-bash /tmp/linubot-install.sh --version 2.6.1 --build --launch
+bash /tmp/linubot-install.sh --version 2.7.0 --build --launch
 ```
 
 This needs Git, Node.js 24+, npm and the Electron GUI libraries. It builds the
@@ -104,6 +109,10 @@ LINUBOT_WORKSPACE_BIN=/path/to/agent-workspace-linux npm start
 Run `agent-workspace-linux doctor` to check the machine's display utilities,
 browser and sandbox support. Linubot uses an owned X11 workspace even when your
 main desktop uses Wayland. Chromium or Google Chrome is required for its browser.
+
+During a task, open **Computer** in the conversation to watch or take control of
+that workspace. No separate viewer window is needed for this flow. The browser
+is disposable and closes with the task; see [computer controls](COMPUTER.md).
 
 Keep npm available for reviewed npm-based MCP servers. Install
 [uv](https://docs.astral.sh/uv/getting-started/installation/) for Python-based
@@ -142,7 +151,7 @@ and an unpacked application at `release/linux-unpacked/linubot`. Install a
 specific built installer with your package manager:
 
 ```sh
-sudo apt install ./release/linubot-2.6.1-amd64.deb
+sudo apt install ./release/linubot-2.7.0-amd64.deb
 ```
 
 For a user installation with versioned directories, use the release installer
