@@ -74,7 +74,7 @@ else {
     const launcher = join(installRoot, 'linubot', 'linubot');
     const managedInstall = app.isPackaged && existsSync(launcher) && realpathSync(launcher) === realpathSync(app.getPath('exe')) && !existsSync(join(dirname(realpathSync(app.getPath('exe'))), '.linubot-source-build'));
     const updates = createUpdates({
-      ...(process.env.LINUBOT_UPDATE_CHECK === '0' ? { check: async () => ({}) } : {}),
+      enabled: process.env.LINUBOT_UPDATE_CHECK !== '0',
       ...(managedInstall ? { install: async (release) => {
         if (backend.hasActiveWork()) throw new Error('Finish active tasks before upgrading Linubot.');
         const installer = join(process.resourcesPath, 'install.sh');

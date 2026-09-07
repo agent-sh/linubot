@@ -21,13 +21,14 @@ export function parseRelease(value: unknown, installed: string, arch = process.a
   if (!release.assets.some((asset) => asset?.name === name && asset.browser_download_url === assetUrl) || !release.assets.some((asset) => asset?.name === "SHA256SUMS" && asset.browser_download_url === `${REPOSITORY}/releases/download/v${version}/SHA256SUMS`)) return;
   return { version, url, assetUrl };
 }
-export function createUpdates(options: { version?: string; check?: () => Promise<unknown>; install?: (release: ReleaseUpdate) => Promise<void> } = {}) {
+export function createUpdates(options: { version?: string; check?: () => Promise<unknown>; install?: (release: ReleaseUpdate) => Promise<void>; enabled?: boolean } = {}) {
   const version = options.version || appVersion;
   let latest: ReleaseUpdate | undefined, checkedAt = 0, error: string | undefined, checking: Promise<void> | undefined, installing = false;
-  const status = () => ({ currentVersion: version, latest, checkedAt, error, installing, canInstall: Boolean(options.install) });
+  const status = () => ({ enabled: options.enabled !== false, currentVersion: version, latest, checkedAt, error, installing, canInstall: Boolean(options.install) });
   async function check(force = false) {
+    if (options.enabled === false) return status();
     if (checking) { await checking; return status(); }
-    if (checkedAt && Date.now() - checkedAt < (force ? 60000 : 6 * 3600000)) return status();
+    if (checkedAt && Date.now() - checkedAt < (force || error ? 60000 : 15 * 60000)) return status();
     checking = (async () => {
       try { latest = parseRelease(await (options.check ? options.check() : fetchPublicJson("https://api.github.com/repos/agent-sh/linubot/releases/latest")), version); error = undefined; }
       catch { error = "Could not check GitHub releases. Try again later."; }

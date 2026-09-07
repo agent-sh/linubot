@@ -4,6 +4,16 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.7.1
+
+Checked on 2026-09-07: 296 source tests and five desktop scenarios passed
+from both source and the packaged executable.
+Update checks cover manual discovery, foreground refresh, retry timing and
+coalesced requests. Virtual-clock tests verify that approval waiting does not
+consume an explicit execution budget and normal tasks remain stoppable after an
+hour without a default deadline. Per-call timeouts and model/tool step limits
+remain in place.
+
 ## Release acceptance: 2.7.0
 
 Checked on 2026-09-07: 293 source tests and four packaged desktop scenarios
@@ -33,6 +43,9 @@ Checked on 2026-09-07:
 
 Raw trials stay outside the public source because they can contain local paths,
 credentials or provider output.
+
+Normal tasks have no fixed overall time deadline. Tests cover approval waiting
+and manual control separately from active execution, including explicit budgets.
 
 ## Local checks
 
