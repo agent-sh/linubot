@@ -16,13 +16,21 @@ const formats = {
 export async function providerSettings(ctx, main) {
   const [initial, presets] = await Promise.all([ctx.get("/api/provider/connections"), ctx.get("/api/provider/presets")]);
   if (!ctx.current()) return;
+  const featured = presets.find((p) => p.featured);
+  const presetOption = (p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`;
   let connections = initial, saved = initial.connections.find((p) => p.id === initial.activeId), isNew = false;
-  main.innerHTML = `<div class="provider-connections"><div class="connection-picker"><label>Saved connections<select data-connection></select></label><button type="button" data-new-connection>Add connection</button></div><div data-xai-account></div><div class="settings-grid"><div><div class="section-heading"><h2>Connection settings</h2><span data-ready></span></div><form class="settings-form" data-provider><div class="split"><label>Provider<select name="preset"><option value="custom">Custom endpoint</option>${presets.map((p) => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("")}</select></label><label>Connection name<input name="name" maxlength="80" required></label></div><label>Endpoint base URL<input name="baseUrl" type="url" required placeholder="https://your-provider.example/v1"></label><div class="split"><label>API format<select name="kind">${Object.entries(formats).map(([id, [name]]) => `<option value="${id}">${esc(name)}</option>`).join("")}</select></label><label data-auth-label>Authentication<select name="auth"><option value="bearer">Bearer token / API key</option><option value="x-api-key">x-api-key header</option><option value="none">No authentication</option></select></label></div><p class="field-hint" data-format-hint></p><label data-key-label>API key or bearer token<input name="apiKey" type="password" autocomplete="new-password" spellcheck="false"></label><div data-provider-model></div><div class="credential-options"><label class="check-label" data-remember-label><input name="rememberKey" type="checkbox"><span>Remember key with the Linux keyring</span></label><label class="check-label" data-clear-label><input name="clearKey" type="checkbox"><span>Clear this connection’s key on save</span></label></div><div data-feedback hidden></div><div class="form-actions"><button type="submit" class="primary">Save connection</button></div></form><section class="section" data-test-section><button type="button" data-test>Test connection</button><p class="field-hint">Sends one short prompt using this saved connection.</p><div data-feedback hidden></div><pre class="technical" data-test-output hidden></pre></section><details class="section" data-machine-section><summary>Use a local credential file</summary><p class="field-hint">Choose a file to review before its credential is read.</p><button type="button" data-find-configs>Find local credential files</button><div data-feedback hidden></div><div data-config-list></div></details></div><aside class="settings-note"><p class="eyebrow">App default</p><h2 data-default-name></h2><p data-default-model></p><button type="button" data-use-default>Use this connection as default</button><p class="field-hint">Bots follow the app default unless you choose a connection in their model settings.</p><section class="section"><h3>Your endpoint, your model</h3><p>Choose a prepared provider or a custom API base URL. Refresh models to read that endpoint’s catalog. Custom IDs work when a catalog is unavailable.</p><p class="field-hint">Model availability and tool or image support depend on the provider. HTTPS is required for remote endpoints; local servers can use HTTP.</p></section><section class="section"><button type="button" class="small danger" data-remove>Remove connection</button><div data-feedback hidden></div></section></aside></div></div>`;
+  main.innerHTML = `<div class="provider-connections"><div class="connection-picker"><label>Saved connections<select data-connection></select></label><button type="button" data-new-connection>Add connection</button></div><div data-xai-account></div><div class="settings-grid"><div><div class="section-heading"><h2>Connection settings</h2><span data-ready></span></div><form class="settings-form" data-provider><div class="split"><label>Provider<select name="preset">${featured ? presetOption(featured) : ""}<option value="custom">Custom endpoint</option>${presets.filter((p) => p !== featured).map(presetOption).join("")}</select></label><label>Connection name<input name="name" maxlength="80" required></label></div><label>Endpoint base URL<input name="baseUrl" type="url" required placeholder="https://your-provider.example/v1"></label><div class="split"><label>API format<select name="kind">${Object.entries(formats).map(([id, [name]]) => `<option value="${id}">${esc(name)}</option>`).join("")}</select></label><label data-auth-label>Authentication<select name="auth"><option value="bearer">Bearer token / API key</option><option value="x-api-key">x-api-key header</option><option value="none">No authentication</option></select></label></div><p class="field-hint" data-format-hint></p><label data-key-label>API key or bearer token<input name="apiKey" type="password" autocomplete="new-password" spellcheck="false"></label><div data-provider-model></div><div class="credential-options"><label class="check-label" data-remember-label><input name="rememberKey" type="checkbox"><span>Remember key with the Linux keyring</span></label><label class="check-label" data-clear-label><input name="clearKey" type="checkbox"><span>Clear this connection’s key on save</span></label></div><div data-feedback hidden></div><div class="form-actions"><button type="submit" class="primary">Save connection</button></div></form><section class="section" data-test-section><button type="button" data-test>Test connection</button><p class="field-hint">Sends one short prompt using this saved connection.</p><div data-feedback hidden></div><pre class="technical" data-test-output hidden></pre></section><details class="section" data-machine-section><summary>Use a local credential file</summary><p class="field-hint">Choose a file to review before its credential is read.</p><button type="button" data-find-configs>Find local credential files</button><div data-feedback hidden></div><div data-config-list></div></details></div><aside class="settings-note"><p class="eyebrow">App default</p><h2 data-default-name></h2><p data-default-model></p><button type="button" data-use-default>Use this connection as default</button><p class="field-hint">Bots follow the app default unless you choose a connection in their model settings.</p><section class="section"><h3>Your endpoint, your model</h3><p>Choose a prepared provider or a custom API base URL. Refresh models to read that endpoint’s catalog. Custom IDs work when a catalog is unavailable.</p><p class="field-hint">Model availability and tool or image support depend on the provider. HTTPS is required for remote endpoints; local servers can use HTTP.</p></section><section class="section"><button type="button" class="small danger" data-remove>Remove connection</button><div data-feedback hidden></div></section></aside></div></div>`;
   const form = main.querySelector("[data-provider]"), connectionSelect = main.querySelector("[data-connection]"), useDefault = main.querySelector("[data-use-default]"), test = main.querySelector("[data-test]"), remove = main.querySelector("[data-remove]");
   const xaiRoot = main.querySelector("[data-xai-account]");
   const roster = document.createElement("section"); roster.className = "provider-roster";
   roster.innerHTML = '<h2>Your providers</h2><p class="field-hint">All ready connections stay available at the same time. Choose a provider for each bot; the app default is for bots that follow it.</p><div data-provider-roster></div>';
   main.querySelector(".provider-connections").prepend(roster);
+  if (featured) {
+    const card = document.createElement("section"); card.className = "provider-featured";
+    card.innerHTML = `<h2>${esc(featured.name)}</h2><p>Tiyuvta is Linubot's own hosted inference. OpenAI-compatible, pay per use, new accounts start with free credit.</p><div class="actions"><button type="button" class="primary" data-connect-featured>Connect ${esc(featured.name)}</button><a href="https://inference.tiyuvta.ai/login?next=/app/keys" target="_blank" rel="noopener noreferrer">Get an API key</a></div>`;
+    roster.before(card);
+    card.querySelector("[data-connect-featured]").onclick = () => newConnection(featured);
+  }
   const browserRoot = document.createElement("section"); browserRoot.className = "section browser-connect";
   browserRoot.innerHTML = '<div class="section-heading"><div><h2>Connect OpenRouter</h2><p class="field-hint">Sign in in your browser. Linubot receives the callback and loads your models.</p></div></div><div class="actions"><button type="button" class="primary" data-browser-login>Connect in browser</button><button type="button" data-cancel-login hidden>Cancel sign-in</button></div><div data-feedback hidden></div><div data-login-link></div>';
   xaiRoot.after(browserRoot);
@@ -91,7 +99,7 @@ export async function providerSettings(ctx, main) {
     connectionOptions(); controls();
     main.querySelector("[data-ready]").innerHTML = badge(saved.ready ? "approved" : "pending", saved.ready ? "Configured" : "Setup needed");
     main.querySelector("[data-test-output]").hidden = true; feedback(form, "");
-    if (!fresh && (saved.hasKey || saved.auth === "none")) void picker.load();
+    if (!fresh && (saved.hasKey || saved.auth === "none" || presets.find((p) => p.id === form.elements.preset.value)?.publicCatalog)) void picker.load();
   }
   form.addEventListener("input", controls);
   form.addEventListener("actionend", controls);
@@ -119,9 +127,15 @@ export async function providerSettings(ctx, main) {
     form.elements.apiKey.value = ""; form.elements.clearKey.checked = false;
     if (preset.auth === "none") form.elements.rememberKey.checked = false;
     invalidate();
+    if (preset.publicCatalog) void picker.load();
   };
   connectionSelect.onchange = () => { void cancelLogin(); const connection = connections.connections.find((p) => p.id === connectionSelect.value); if (connection) show(connection); };
-  main.querySelector("[data-new-connection]").onclick = () => show({ name: "New connection", kind: "openai-compat", baseUrl: "", auth: "bearer", model: "", hasKey: false, ready: false, rememberKey: false, credentialStorage: saved.credentialStorage }, true);
+  function newConnection(preset = featured) {
+    show({ name: "New connection", kind: "openai-compat", baseUrl: "", auth: "bearer", model: "", hasKey: false, ready: false, rememberKey: false, credentialStorage: saved.credentialStorage }, true);
+    if (preset) { form.elements.preset.value = preset.id; form.elements.preset.onchange(); }
+    form.elements.apiKey.focus();
+  }
+  main.querySelector("[data-new-connection]").onclick = () => newConnection();
   async function save(makeDefault) {
     const value = draft();
     if (!value.model || value.model === "default") throw new Error("Choose a model from the endpoint or enter its exact ID.");
@@ -189,6 +203,8 @@ export async function providerSettings(ctx, main) {
     }
     loginTimer = setTimeout(poll, 1000);
   }, "Opening browser sign-in…");
-  show(saved);
+  const requested = new URLSearchParams(location.hash.split("?")[1] || "").get("preset");
+  const requestedPreset = presets.find((p) => p.id === requested);
+  if (requestedPreset) newConnection(requestedPreset); else show(saved);
   await xaiAccount(ctx, xaiRoot);
 }

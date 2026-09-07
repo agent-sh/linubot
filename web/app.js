@@ -23,7 +23,7 @@ let drawerReturn = null;
 const renderedRosters = new WeakMap();
 
 function routeParts() {
-  try { return (location.hash.replace(/^#\/?/, "") || "home").split("/").map(decodeURIComponent); }
+  try { return (location.hash.split("?")[0].replace(/^#\/?/, "") || "home").split("/").map(decodeURIComponent); }
   catch { return ["not-found"]; }
 }
 function navigate(path) {
@@ -62,6 +62,7 @@ function renderSidebar() {
   document.querySelector("[data-learning-summary]").textContent = learningSummary ? `${learningSummary} available` : "";
   const provider = document.getElementById("provider-status");
   provider.innerHTML = `<span class="status-dot${overview.provider.ready ? " ready" : ""}" aria-hidden="true"></span><span>${esc(overview.provider.ready ? overview.provider.model : "Connect a model")}</span>`;
+  provider.href = overview.provider.ready ? "#/settings/provider" : "#/settings/provider?preset=tiyuvta";
   provider.title = overview.provider.ready ? "Provider configured. This does not imply a successful live test." : "Open provider settings";
 }
 async function refreshOverview(force = false) {

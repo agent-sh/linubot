@@ -4,6 +4,20 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.11.0
+
+Checked on 2026-09-08: 334 source tests, eight packaged desktop scenarios,
+and Android QR unit tests/build/lint passed.
+
+Built-in workspace, memory, session, skill, web and artifact tools are always
+loaded. Only connected MCP tools go through `search_tools`, covered by
+`tests/tool-discovery.test.ts`.
+
+Tiyuvta is the first and featured provider and the default for new connections.
+Its public catalog loads before a key is entered, and the home and header prompt
+it first. This is covered by `tests/provider-presets.test.ts` and the providers
+desktop scenario.
+
 ## Release acceptance: 2.10.0
 
 Checked on 2026-09-07: 330 source tests, eight packaged desktop scenarios,
