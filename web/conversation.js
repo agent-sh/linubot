@@ -101,6 +101,7 @@ export async function renderConversation(ctx) {
     root.querySelector("[data-redirect-warning]").hidden = cache.draft.mode !== "redirect";
     root.querySelector("[data-options-active]").hidden = !cache.draft.criteria && !cache.draft.remember && cache.draft.mode === "queue";
     root.querySelector("[data-bot-status]").textContent = active.some((run) => run.status === "awaiting_approval") ? "Needs you for a moment" : busy ? "Working on it…" : subtitle;
+    if (ctx.kind === "bot" && (ctx.getOverview().bots.find(bot => bot.name === ctx.name)?.permissionMode ?? profile.permissionMode) === "auto") root.querySelector("[data-bot-status]").textContent += " · Always approve";
     root.querySelector(".conversation-identity").classList.toggle("is-working", busy);
     const learning = root.querySelector("[data-bot-learning]");
     if (learning) { const count = ctx.getOverview().proposals.filter((proposal) => proposal.bot === ctx.name && proposal.status === "proposed").length; learning.hidden = !count; learning.title = `${count} learning note${count === 1 ? "" : "s"}`; }
@@ -175,7 +176,7 @@ export async function renderConversation(ctx) {
         return node;
       }
       node.className = "approval";
-      node.innerHTML = `<h3>${icon("shield")} ${pending ? "Your approval is needed" : "Approval record"} ${badge(decided || (cache.expired.has(event.seq) ? "unavailable" : "pending"))}</h3><p>${esc(event.text)}</p>${event.detail ? `<details><summary>Review action details</summary><pre class="technical">${esc(event.detail)}</pre></details>` : ""}<p class="field-hint">${pending ? "This permission is for this action only. Review the target and network access before approving." : "This request is no longer actionable."}</p>${pending ? `<div class="actions"><button type="button" class="primary" data-decision="approved" data-approval="${event.seq}"${cache.approvalsBusy.has(event.seq) ? " disabled" : ""}>Approve once</button><button type="button" data-decision="denied" data-approval="${event.seq}"${cache.approvalsBusy.has(event.seq) ? " disabled" : ""}>Deny</button></div>` : ""}${cache.decisionErrors.has(event.seq) ? `<p class="form-feedback error" role="alert">${esc(cache.decisionErrors.get(event.seq))}</p>` : ""}`;
+      node.innerHTML = `<h3>${icon("shield")} ${pending ? "Your approval is needed" : "Approval record"} ${badge(decided || (cache.expired.has(event.seq) ? "unavailable" : "pending"))}</h3><p>${esc(event.text)}</p>${event.detail ? `<details><summary>Review action details</summary><pre class="technical">${esc(event.detail)}</pre></details>` : ""}<p class="field-hint">${pending ? "Approve once for this action, or always approve to skip action permission prompts for this bot in all conversations. You can change this in Settings → Permissions." : "This request is no longer actionable."}</p>${pending ? `<div class="actions"><button type="button" class="primary" data-decision="approved" data-approval="${event.seq}"${cache.approvalsBusy.has(event.seq) ? " disabled" : ""}>Approve once</button><button type="button" data-decision="always" data-approval="${event.seq}"${cache.approvalsBusy.has(event.seq) ? " disabled" : ""}>Always approve for this bot</button><button type="button" data-decision="denied" data-approval="${event.seq}"${cache.approvalsBusy.has(event.seq) ? " disabled" : ""}>Deny</button></div>` : ""}${cache.decisionErrors.has(event.seq) ? `<p class="form-feedback error" role="alert">${esc(cache.decisionErrors.get(event.seq))}</p>` : ""}`;
     } else if (event.kind === "file") {
       node.className = "file-event";
       const href = safeArtifact(event.path);
@@ -430,7 +431,7 @@ export async function renderConversation(ctx) {
       cache.approvalsBusy.add(seq); cache.decisionErrors.delete(seq); scheduleRender();
       try {
         await post("/api/approvals", { scope, seq, decision: decision.dataset.decision });
-        cache.decisions.set(seq, decision.dataset.decision);
+        cache.decisions.set(seq, decision.dataset.decision === "always" ? "approved" : decision.dataset.decision);
         if (ctx.current()) { void history(); void refreshRuns(); }
         ctx.changed();
       } catch (error) {

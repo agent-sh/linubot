@@ -166,7 +166,7 @@ export function getBot(name: string): BotProfile | null {
   const p = readJson<Partial<BotProfile> | undefined>(path, undefined);
   if (p === undefined) return null;
   if (!p || typeof p !== "object" || Array.isArray(p) || p.name !== name) throw new Error(`invalid stored bot profile: ${name}`);
-  const skills = textList(p.skills === undefined ? [] : p.skills, "skills", 40, 40);
+  const skills = textList(p.skills === undefined ? [] : p.skills, "skills", 256, 40);
   if (skills.some((skill) => !validSkillName(skill))) throw new InputError("invalid skill name in bot profile");
   if (p.pinned !== undefined && typeof p.pinned !== "boolean") throw new InputError("pinned must be a boolean");
   if (p.color !== undefined && (typeof p.color !== "string" || !/^#[0-9a-f]{6}$/i.test(p.color))) throw new Error(`invalid stored bot color: ${name}`);
@@ -211,7 +211,7 @@ export function updateBot(name: string, patch: BotOptions & { skills?: string[];
   else if (patch.providerId !== undefined) profile.providerId = requiredText(patch.providerId, "Provider connection", 80);
   if (patch.mascotSeed !== undefined) profile.mascotSeed = mascotSeed(patch.mascotSeed);
   if (patch.skills !== undefined) {
-    const skills = textList(patch.skills, "skills", 40, 40);
+    const skills = textList(patch.skills, "skills", 256, 40);
     for (const skill of skills) {
       if (!validSkillName(skill)) throw new InputError("invalid skill name");
       if (!readInstalledSkill(skill)) throw new InputError(`skill is not installed and approved: ${skill}`);

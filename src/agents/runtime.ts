@@ -1,3 +1,4 @@
+import { botPermission, savePermission } from "./permissions.ts";
 import { createWorkspaceView, type WorkspaceView } from "../computer/view.ts";
 import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync, lstatSync } from "node:fs";
@@ -85,6 +86,7 @@ const text = { type: "string" };
 export function agentTools(allowMemoryWrites = true): ToolDefinition[] {
   return [
     { name: "read_webpage", description: "Read a public HTTPS page and return its text and links. For JavaScript apps or non-text files, use the workspace browser.", parameters: schema({ url: text }, ["url"]) },
+    { name: "list_skills", description: "Find approved skills attached to this bot, including skills beyond the prompt budget. Read a matching skill with read_skill_file and path SKILL.md before using it. Optional query and offset for pages of 20 skills.", parameters: schema({ query: text, offset: { type: "integer" } }) },
     { name: "read_skill_file", description: "Read a supporting text file of an approved skill attached to this teammate. Paths are relative to the skill folder.", parameters: schema({ skill: text, path: text }, ["skill", "path"]) },
     { name: "launch_workspace_app", description: "Launch an application in this task's owned workspace. Asks approval for the exact executable and arguments; no host desktop is targeted.", parameters: schema({ command: text, args: { type: "array", items: text }, name: text }, ["command"]) },
     { name: "read_workspace_log", description: "Read stdout from an application launched in this task's workspace. Use the app ID returned by launch_workspace_app.", parameters: schema({ app: text }, ["app"]) },
@@ -155,6 +157,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
 
   async function approve(run: RunRecord, detail: string, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted();
+    if (botPermission(run.bot).mode === "auto") { emit(run, { kind: "approval", status: "approved", text: "Automatically approved by your Always approve setting.", detail }); return; }
     const event = emit(run, { kind: "approval", status: "pending", text: "Approve this workspace action once?", detail });
     const key = `${run.scope}:${event.seq}`;
     state(updateRun(run.id, { status: "awaiting_approval" }));
@@ -171,7 +174,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
     } finally {
       approvals.delete(key);
       signal.removeEventListener("abort", onAbort);
-      emit(run, { kind: "approval", refSeq: event.seq, status: allowed && !signal.aborted ? "approved" : "denied", text: signal.aborted ? "Approval expired when the task stopped." : allowed ? "Approved once." : "Denied." });
+      emit(run, { kind: "approval", refSeq: event.seq, status: allowed && !signal.aborted ? "approved" : "denied", text: signal.aborted ? "Approval expired when the task stopped." : allowed ? botPermission(run.bot).mode === "auto" ? "Approved by your Always approve setting." : "Approved once." : "Denied." });
       if (!signal.aborted) state(updateRun(run.id, { status: "running" }));
     }
   }
@@ -279,6 +282,13 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
         return { ...result, content: observations };
       }
       if (name === "read_webpage") return readWebpage(requiredText(args.url, "URL", 4000), signal);
+      if (name === "list_skills") {
+        const query = args.query === undefined ? "" : requiredText(args.query, "Skill query", 100).toLowerCase();
+        const offset = args.offset ?? 0;
+        if (typeof offset !== "number" || !Number.isInteger(offset) || offset < 0) throw new InputError("Invalid skill offset");
+        const skills = (getBot(run.bot)?.skills ?? []).map(name => readInstalledSkill(name)).filter(skill => skill && (!query || `${skill.name} ${skill.description}`.toLowerCase().includes(query)));
+        return { total: skills.length, skills: skills.slice(offset, offset + 20).map(skill => ({ name: skill!.name, description: skill!.description.slice(0, 200) })), nextOffset: offset + 20 < skills.length ? offset + 20 : null };
+      }
       if (name === "read_skill_file") {
         const skill = requiredText(args.skill, "Skill", 40);
         if (!getBot(run.bot)?.skills.includes(skill)) throw new InputError("This skill is not attached to the teammate", 403);
@@ -414,7 +424,7 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
         event: (text, detail) => { emit(run, { kind: "thinking", status: "done", text, detail }); } });
       const past = await contextManager.history(signal);
       context = currentMemory(context);
-      messages.push({ role: "system", content: context.system + (canWriteMemory ? "" : "\nThis is an automated or delegated task. Memory is read-only; do not turn its prompt into personal facts.") + `\n\nTask success criteria:\n${run.criteria.map((criterion) => `- ${criterion}`).join("\n") || "No explicit criteria. Deliver the requested result and state limitations."}` }, ...past, { role: "user", content: run.prompt, pinned: true });
+      messages.push({ role: "system", content: context.system + (botPermission(run.bot).mode === "auto" ? "\nThe owner enabled Always approve for runtime actions. Use the tools without asking for redundant approvals in chat. Private sign-in still needs request_user_control; you must not ask for passwords in chat." : "") + (canWriteMemory ? "" : "\nThis is an automated or delegated task. Memory is read-only; do not turn its prompt into personal facts.") + `\n\nTask success criteria:\n${run.criteria.map((criterion) => `- ${criterion}`).join("\n") || "No explicit criteria. Deliver the requested result and state limitations."}` }, ...past, { role: "user", content: run.prompt, pinned: true });
       if (run.resumedFrom) messages.push({ role: "user", content: `Continue unfinished task ${run.resumedFrom} from the saved session context and original request above. Use read_session to recover details; do not repeat completed work. The previous run hit an execution limit. Reopen the saved bot or group browser if needed. Past approvals are historical; request new approval where required.`, pinned: true });
       if (run.scope.startsWith("group:")) messages.push({ role: "user", content: `It is ${run.bot}'s turn. Address the shared brief, build on prior teammates' responses, and do not impersonate them.`, pinned: true });
       toolList.push(...agentTools(canWriteMemory));
@@ -693,12 +703,17 @@ export function createAgentRuntime(options: { workspaceView?: WorkspaceView; com
       if ([...approvals.values()].some((approval) => approval.scope === scope)) return "awaiting_approval";
       return active.has(scope) ? "working" : queues.has(scope) ? "queued" : "idle";
     },
+    setPermissionMode(mode: string, bot?: string): void {
+      savePermission(mode, bot);
+      for (const [key, approval] of approvals) if (botPermission(getRun(approval.runId).bot).mode === "auto") { approvals.delete(key); approval.decide(true); }
+    },
     decide(scope: string, seq: number, decision: string): void {
       validateScope(scope);
-      if (!["approved", "denied"].includes(decision)) throw new InputError("Decision must be approved or denied");
+      if (!["approved", "denied", "always"].includes(decision)) throw new InputError("Decision must be approved, denied or always");
       const key = `${scope}:${seq}`;
       const approval = approvals.get(key);
       if (!approval) throw new InputError("Approval expired or was already decided", 410);
+      if (decision === "always") { this.setPermissionMode("auto", getRun(approval.runId).bot); return; }
       approvals.delete(key);
       approval.decide(decision === "approved");
     },

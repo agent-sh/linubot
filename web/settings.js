@@ -5,12 +5,13 @@ import { mcpSettings } from "./extensions.js";
 import { api, post, esc, enc, icon, badge, page, tabs, empty, dialog, submit, action, feedback, confirmAction, safeUrl, lines } from "./ui.js";
 
 export async function renderSettings(ctx) {
-  const pane = ["provider", "search", "mcp", "context", "phone"].includes(ctx.name) ? ctx.name : "provider";
-  ctx.root.innerHTML = page("Settings", "Manage your model, web access and connected tools.", `${tabs([["provider", "Provider & credentials", "#/settings/provider"], ["search", "Web search", "#/settings/search"], ["mcp", "Connected tools", "#/settings/mcp"], ["context", "Long conversations", "#/settings/context"], ["phone", "Phone access", "#/settings/phone"]], pane)}<section class="section" data-app-updates></section><div data-settings-pane><p class="quiet-empty" role="status">Reading configuration...</p></div>`, "", "Settings / Local control");
+  const pane = ["provider", "search", "mcp", "context", "phone", "permissions"].includes(ctx.name) ? ctx.name : "provider";
+  ctx.root.innerHTML = page("Settings", "Manage your model, web access and connected tools.", `${tabs([["provider", "Provider & credentials", "#/settings/provider"], ["search", "Web search", "#/settings/search"], ["mcp", "Connected tools", "#/settings/mcp"], ["context", "Long conversations", "#/settings/context"], ["phone", "Phone access", "#/settings/phone"], ["permissions", "Permissions", "#/settings/permissions"]], pane)}<section class="section" data-app-updates></section><div data-settings-pane><p class="quiet-empty" role="status">Reading configuration...</p></div>`, "", "Settings / Local control");
   updateSettings(ctx, ctx.root.querySelector("[data-app-updates]"));
   const main = ctx.root.querySelector("[data-settings-pane]");
   if (pane === "provider") await providerSettings(ctx, main);
   else if (pane === "search") await searchSettings(ctx, main);
+  else if (pane === "permissions") await permissionControls(ctx, main);
   else if (pane === "phone") await phoneSettings(ctx, main);
   else if (pane === "context") await contextControls(ctx, main);
   else await mcpSettings(ctx, main);
@@ -62,4 +63,13 @@ async function searchSettings(ctx, main) {
     feedback(search, `${hits.length} search result${hits.length === 1 ? "" : "s"} returned.`, "success");
   }, "Searching the configured endpoint...");
   sync();
+}
+
+async function permissionControls(ctx, main) {
+  const value = await ctx.get("/api/permissions"); if (!ctx.current()) return;
+  const choices = (inherited = false) => `${inherited ? '<option value="inherit">Use default</option>' : ''}<option value="ask">Ask first</option><option value="auto">Always approve (skip prompts)</option>`;
+  main.innerHTML = `<section class="section"><h2>Permission mode</h2><p>Always approve lets bots open workspaces, launch applications, call MCP tools and perform external actions without asking each time. Use it only for bots and tools you trust. Manual sign-in handoffs and Stop still work.</p><form data-default-permission><label>Default for bots<select name="mode" aria-label="Default for bots">${choices()}</select></label><button class="primary">Save permission mode</button><div data-feedback hidden></div></form><h3>Individual bots</h3>${value.bots.map(bot => `<form class="section-heading" data-bot-permission="${esc(bot.name)}"><label>${esc(bot.name)}<select name="mode">${choices(true)}</select></label><button class="small">Save for ${esc(bot.name)}</button><div data-feedback hidden></div></form>`).join("")}</section>`;
+  const form = main.querySelector('[data-default-permission]'); form.elements.mode.value = value.mode;
+  submit(form, async data => { await api('/api/permissions',{method:'PUT',body:{mode:data.get('mode')}});ctx.changed();if(ctx.current())feedback(form,'Permission mode saved. Pending requests covered by automatic approval can continue.','success'); });
+  main.querySelectorAll('[data-bot-permission]').forEach(form => { form.elements.mode.value=value.bots.find(bot=>bot.name===form.dataset.botPermission).override;submit(form,async data=>{await api('/api/permissions',{method:'PUT',body:{mode:data.get('mode'),bot:form.dataset.botPermission}});ctx.changed();if(ctx.current())feedback(form,'Bot permission mode saved.','success');}); });
 }

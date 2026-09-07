@@ -74,6 +74,18 @@ test('imports Hermes context and a Grok group into working Linubot conversations
     await expect(page.locator('.conversation-header h1')).toHaveText('Scout team');
     await expect(page.locator('.message-body').last()).toHaveText('Fern supplied this cached answer.');
     await page.screenshot({ path: 'test-results/imported-group.png', fullPage: true });
+    await page.evaluate(() => { location.hash = '#/imports'; });
+    await app.evaluate(({dialog}, path) => { dialog.showOpenDialog = async () => ({canceled:false,filePaths:[path]}); }, hermes);
+    await page.getByRole('button', {name:'Choose exported folder',exact:true}).click();
+    await expect(page.getByRole('checkbox', {name:'hermes',exact:true})).toBeVisible();
+    await page.getByRole('checkbox', {name:'hermes',exact:true}).check();
+    await page.getByRole('textbox', {name:'Linubot name',exact:true}).fill('ExportedGrok');
+    await page.getByRole('button', {name:'Preview import',exact:true}).click();
+    await expect(page.locator('[data-import-preview]')).toContainText('1 attached skills');
+    await page.getByRole('button', {name:'Import into Linubot',exact:true}).click();
+    await expect(page.getByRole('heading', {name:'Your teammates are ready',exact:true})).toBeVisible();
+    const exported=await page.evaluate(()=>fetch('/api/bots/ExportedGrok').then(r=>r.json()));
+    expect(exported.skills).toHaveLength(1);expect(exported.importedContext).toContain('DESKTOP_IMPORT_7391');
     expect(errors).toEqual([]);
   } finally { if (app) await app.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); rmSync(directory, { recursive: true, force: true }); }
 });

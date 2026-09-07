@@ -9,8 +9,8 @@ and conversations; it does not run the original agent or restart past tasks.
 | --- | --- | --- |
 | Name and role | Profile name and SOUL.md | Cached name and description |
 | Model | Source model shown; choose a Linubot connection | Choose a Linubot connection |
-| Memories | USER.md and MEMORY.md, kept with the imported bot | Cloud memory is unavailable |
-| Skills | Instructions and supporting files, as Library drafts | Cloud skills are unavailable |
+| Memories | USER.md and MEMORY.md, kept with the imported bot | Available from an exported folder; absent from local cache |
+| Skills | Instructions and supporting files, attached after preview | Available from an exported folder; absent from local cache |
 | History | Up to three recent conversations, at most 200 visible text messages each | Recent cached text messages |
 | Groups | Select multiple profiles together | Group and all locally available members |
 | Routines | Compatible UTC cron prompts, imported paused | Cloud schedules are unavailable |
@@ -23,7 +23,10 @@ the bot's derived conversation checkpoint. Imported conversation messages retain
 their timestamps and speakers and never become active requests or approval grants.
 
 Skills receive names scoped to the imported bot and retain their supporting files.
-Review drafts in the Library, then attach approved skills in the bot's options.
+After you confirm the preview, they are approved and attached by default so the
+bot can use them. Clear **Attach imported skills** to keep them as Library drafts.
+Up to 256 skills can be attached; the bot can search the full list with
+`list_skills` and load instructions/supporting files with `read_skill_file`.
 Known credential filenames and hidden files are excluded from skill bundles.
 Source-specific tool references may need editing for Linubot.
 
@@ -36,6 +39,44 @@ Existing group membership is not synchronized or replaced. Preview tokens last t
 snapshot is committed. Failed commits roll back their new files and configuration
 changes. Successful receipts are retained locally.
 
+## Bring Grok cloud knowledge or a downloaded profile
+
+The Grok desktop cache has descriptions and recent messages, but does not contain
+cloud-only memory, skill files or custom instructions. Linubot cannot retrieve
+unavailable cloud state from that cache. Grok's public sharing/duplication flow
+also does not carry learned memory or conversation history.
+
+Save the bot's actual user-owned knowledge files from Grok's computer, then
+choose **Choose exported folder** in the Linux import page. The folder is selected
+through a native Linux file picker and becomes another selectable import source.
+This is a file-transfer path, not a claim that Grok has a full-state export API.
+The expected layout is:
+
+```text
+MyBot/
+  SOUL.md
+  MEMORY.md
+  USER.md
+  memories/MEMORY.md
+  skills/my-skill/SKILL.md
+  skills/my-skill/references/guide.md
+```
+
+Include only the files that actually exist; do not invent missing memories.
+`SOUL.md` contains your bot's custom instructions, and either root-level memory
+files or their `memories/` equivalents can be used. Supporting skill files retain
+their relative paths. A downloaded Hermes profile can use the same control after
+being unpacked on Linux; supported Hermes SQLite history and compatible routines
+are handled by the existing adapter. Each selected folder represents one bot.
+The preview shows memory size, skills and missing-data warnings before importing.
+
+Grok's [bot sharing documentation](https://docs.x.ai/grok-bot/bots) and
+[shared files guide](https://docs.x.ai/grok-bot/files-and-results) describe the
+available source mechanisms. Hermes also provides
+[profile exports](https://hermes-agent.nousresearch.com/docs/user-guide/profile-distributions).
+Cloud exports need to be downloaded by the owner; they are not auto-fetched using
+undocumented endpoints. Adding a folder does not modify its source files.
+
 ## Locations and limits
 
 Hermes is discovered under HERMES_HOME or ~/.hermes, including named profiles
@@ -46,7 +87,8 @@ set LINUBOT_IMPORT_HERMES or LINUBOT_IMPORT_GROK before starting Linubot.
 The Grok adapter targets Grok Bot 0.30.0: roster schema 3,
 transcript-cache schema 1. This cache is a partial local view of cloud data.
 Cloud-only instructions, workspace files, memories, skills and schedules cannot
-be recovered from it; the preview calls out these omissions. Source applications,
+be recovered from the cache; use an exported folder for available knowledge files.
+The preview calls out missing data. Source applications,
 databases, logins and running tasks are left in place.
 
 Select up to 100 sources per import. The combined snapshot is bounded to 24 MiB, 256 skills, bounded supporting-file bundles, and

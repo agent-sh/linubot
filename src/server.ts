@@ -1,3 +1,4 @@
+import { permissionSettings, botPermission } from "./agents/permissions.ts";
 import { createPhoneAccess } from "./phone/access.ts";
 import { phoneNetwork } from "./phone/tailscale.ts";
 import QRCode from "qrcode";
@@ -91,7 +92,7 @@ function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { scheduler?: boolean; accessToken?: string; webRoot?: string; onProviderConnected?: (id: string) => void; openRouterRequest?: typeof fetch; importRoots?: ImportRoots; updates?: Updates; phonePort?: number } = {}) {
+export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { scheduler?: boolean; accessToken?: string; webRoot?: string; onProviderConnected?: (id: string) => void; openRouterRequest?: typeof fetch; importRoots?: ImportRoots; updates?: Updates; phonePort?: number; chooseImportFolder?: () => Promise<string | undefined> } = {}) {
   const updates = options.updates ?? createUpdates();
   ensureMemoryFiles();
   const computer = options.computer ?? createComputer();
@@ -122,7 +123,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   const runningJobs = new Map<string, { bot: string; deliver?: string }>();
 
   function roster() {
-    return listBots().map((bot) => ({ ...bot, provider: botProvider(bot), preview: previewOf(`bot:${bot.name}`).slice(0, 140), unread: unreadCount(`bot:${bot.name}`), state: runtime.state(`bot:${bot.name}`) }));
+    return listBots().map((bot) => ({ ...bot, permissionMode: botPermission(bot.name).mode, provider: botProvider(bot), preview: previewOf(`bot:${bot.name}`).slice(0, 140), unread: unreadCount(`bot:${bot.name}`), state: runtime.state(`bot:${bot.name}`) }));
   }
   function botProvider(bot: NonNullable<ReturnType<typeof getBot>>) {
     const status = providerStatus(bot.providerId);
@@ -210,6 +211,10 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
       const b = method === "GET" ? {} : await body(req);
       if (updating && method !== "GET") throw new InputError("Linubot is restarting for an update", 503);
 
+      if (r[0] === "permissions") {
+        if (method === "PUT") runtime.setPermissionMode(requiredText(b.mode, "Permission mode", 20), optionalText(b.bot, "Bot", 40));
+        if (method === "GET" || method === "PUT") { ok({ ...permissionSettings(), bots: listBots().map(bot => ({ name: bot.name, ...botPermission(bot.name) })) }); return; }
+      }
       if (r[0] === "phone") {
         if (!options.accessToken || req.headers["x-linubot-client"] === "phone") throw new InputError("Phone access is managed by the Linux desktop app", 403);
         if (r.length === 1 && method === "GET") { ok(phone.status()); return; }
@@ -256,8 +261,15 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         return;
       }
       if (r[0] === "imports") {
+        if (r[1] === "folder" && method === "POST") {
+          const source = requiredText(b.source, "Source", 20);
+          if (b.path !== undefined || req.headers["x-linubot-client"] === "phone" || !options.chooseImportFolder) throw new InputError("Choose the folder in the Linux app", 409);
+          const path = await options.chooseImportFolder();
+          if (!path) { ok({ cancelled: true }); return; }
+          ok(imports.addFolder(path, source)); return;
+        }
         if (r[1] === "sources" && method === "GET") { ok(imports.discover()); return; }
-        if (r[1] === "preview" && method === "POST") { ok(imports.preview({ sourceId: optionalText(b.sourceId, "Source", 80), sourceIds: b.sourceIds === undefined ? undefined : textList(b.sourceIds, "Sources", 100, 80), name: optionalText(b.name, "Name", 40), providerId: optionalText(b.providerId ?? undefined, "Provider", 80), model: optionalText(b.model, "Model", 200), memory: optionalBoolean(b.memory), skills: optionalBoolean(b.skills), history: optionalBoolean(b.history), routines: optionalBoolean(b.routines) })); return; }
+        if (r[1] === "preview" && method === "POST") { ok(imports.preview({ sourceId: optionalText(b.sourceId, "Source", 80), sourceIds: b.sourceIds === undefined ? undefined : textList(b.sourceIds, "Sources", 100, 80), name: optionalText(b.name, "Name", 40), providerId: optionalText(b.providerId ?? undefined, "Provider", 80), model: optionalText(b.model, "Model", 200), memory: optionalBoolean(b.memory), skills: optionalBoolean(b.skills), history: optionalBoolean(b.history), routines: optionalBoolean(b.routines), activateSkills: optionalBoolean(b.activateSkills) })); return; }
         if (r[1] === "commit" && method === "POST") { ok(imports.commit(requiredText(b.id, "Preview", 80))); return; }
       }
       if (r[0] === "bots") {
@@ -270,13 +282,13 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         }
         const bot = requireBot(r[1]);
         const scope = `bot:${bot.name}`;
-        if (r.length === 2 && method === "GET") { ok({ ...bot, provider: botProvider(bot), soul: readSoul(bot.name), importedContext: readBotContext(bot.name), unread: unreadCount(scope), state: runtime.state(scope), feed: tailEvents(scope) }); return; }
+        if (r.length === 2 && method === "GET") { ok({ ...bot, permissionMode: botPermission(bot.name).mode, provider: botProvider(bot), soul: readSoul(bot.name), importedContext: readBotContext(bot.name), unread: unreadCount(scope), state: runtime.state(scope), feed: tailEvents(scope) }); return; }
         if (r.length === 2 && method === "PATCH") {
           if (b.providerId) getProvider(requiredText(b.providerId, "Provider connection", 80));
           ok(updateBot(bot.name, {
             providerId: b.providerId === null ? null : optionalText(b.providerId, "Provider connection", 80),
             model: optionalText(b.model, "Model", 200) || undefined, topic: b.topic === null ? null : optionalText(b.topic, "Specialty", 2000), goal: optionalText(b.goal, "Goal", 4000), mascotSeed: optionalText(b.mascotSeed, "Mascot seed", 80),
-            pinned: optionalBoolean(b.pinned), skills: b.skills === undefined ? undefined : textList(b.skills, "Skills", 40, 40),
+            pinned: optionalBoolean(b.pinned), skills: b.skills === undefined ? undefined : textList(b.skills, "Skills", 256, 40),
           })); return;
         }
         if (r[2] === "deletion" && method === "GET") { ok(botDeletionPreview(bot.name)); return; }
