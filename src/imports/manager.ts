@@ -12,9 +12,9 @@ import { appendEvent } from "../events/log.ts";
 import { listGroups } from "../chat/session.ts";
 import { InputError } from "../errors.ts";
 
-interface ImportOptions { sourceId: string; name?: string; providerId?: string; model?: string; memory?: boolean; skills?: boolean; history?: boolean; routines?: boolean }
-interface ImportResult { id: string; scope: string; bots: string[]; skills: string[]; routines: string[]; messages: number; warnings: string[] }
-interface Prepared { bundle: SourceBundle; options: ImportOptions; targets: { name: string; source: string; existing: boolean }[]; expires: number; providerId?: string; model: string; sourceKey: string; groupId?: string }
+interface ImportOptions { sourceId?: string; sourceIds?: string[]; name?: string; providerId?: string; model?: string; memory?: boolean; skills?: boolean; history?: boolean; routines?: boolean }
+interface ImportResult { id: string; scope: string; bots: string[]; skills: string[]; routines: string[]; messages: number; warnings: string[]; groups: { id: string; name: string }[] }
+interface Prepared { bundle: SourceBundle; options: ImportOptions; targets: { name: string; source: string; existing: boolean }[]; expires: number; providerId?: string; model: string; groups: { id: string; name: string; sources: string[]; messages: ImportedMessage[] }[] }
 const uuid = /^[0-9a-f-]{36}$/;
 function metadata(name: string) { return readJson<{ source?: string }>(join(dataDir(), "profiles", name, "import.json"), {}); }
 function ensureDirectory(path: string) { const stat = lstatSync(path, { throwIfNoEntry: false }); if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) throw new InputError("Unsafe import destination"); mkdirSync(path, { recursive: true, mode: 0o700 }); }
@@ -29,14 +29,30 @@ export function createAgentImports(roots: ImportRoots = {}) {
     return { ...result, candidates: result.candidates.map((candidate) => ({ ...candidate, importedAs: imported.get(candidate.id) })) };
   }
   function preview(options: ImportOptions) {
-    if (!options || typeof options.sourceId !== "string") throw new InputError("Choose an import source");
+    if (!options || (options.sourceId !== undefined && options.sourceIds !== undefined)) throw new InputError("Choose import sources once");
+    const selected = options.sourceIds ?? (options.sourceId ? [options.sourceId] : []);
+    if (!Array.isArray(selected) || !selected.length || selected.length > 100 || selected.some(id => typeof id !== "string" || !id || id.length > 80)) throw new InputError("Choose between 1 and 100 import sources");
+    const ids = [...new Set(selected)];
+    if (ids.length > 1 && options.name !== undefined) throw new InputError("A custom name is available when importing one bot");
     for (const key of ["memory", "skills", "history", "routines"] as const) if (options[key] !== undefined && typeof options[key] !== "boolean") throw new InputError(`Invalid import option: ${key}`);
     if (options.name !== undefined && !validName(options.name)) throw new InputError("Choose a name using up to 40 letters, digits, hyphens or underscores");
     const provider = getProvider(options.providerId);
     if (options.model !== undefined && typeof options.model !== "string") throw new InputError("Invalid import model");
     const model = options.model && options.model !== "default" ? options.model : provider.model;
     if (typeof model !== "string" || model.length > 200 || !model.trim() || model.trim() === "default") throw new InputError("Choose a provider and model for the imported bot");
-    const bundle = sources.load(options.sourceId, { history: options.history !== false, skills: options.skills !== false, memory: options.memory !== false, routines: options.routines === true });
+    const bundle: SourceBundle = { bots: [], messages: [], warnings: [] };
+    const groups: Prepared["groups"] = [], included = new Set<string>();
+    let totalBytes = 0;
+    for (const id of ids) {
+      const part = sources.load(id, { history: options.history !== false, skills: options.skills !== false, memory: options.memory !== false, routines: options.routines === true });
+      totalBytes += Buffer.byteLength(JSON.stringify(part));
+      if (totalBytes > 24 * 1024 * 1024) throw new InputError("This selection exceeds the 24 MiB import limit. Choose fewer sources.");
+      for (const bot of part.bots) if (!included.has(bot.candidate.id)) { included.add(bot.candidate.id); bundle.bots.push(bot); }
+      bundle.warnings.push(...part.warnings);
+      if (part.group) groups.push({ id: `grok-${part.group.id}`, name: part.group.name, sources: part.bots.map(bot => bot.candidate.id), messages: part.messages });
+      if (ids.length === 1) bundle.group = part.group;
+    }
+    bundle.warnings = [...new Set(bundle.warnings)];
     const taken = new Set(listBots().map((bot) => bot.name));
     const targets = bundle.bots.map((bot) => {
       const existing = listBots().find((p) => metadata(p.name).source === bot.candidate.id);
@@ -50,21 +66,28 @@ export function createAgentImports(roots: ImportRoots = {}) {
     for (const [index, bot] of bundle.bots.entries()) if (!targets[index].existing) for (const skill of bot.skills) validateLearnedSkill({ name: skillName(targets[index].name, skill.name, skill.key), description: skill.description, body: skill.body });
     for (const [id, entry] of pending) if (entry.expires < Date.now()) pending.delete(id);
     if (pending.size >= 3) pending.delete(pending.keys().next().value!);
-    const id = randomUUID(), groupId = bundle.group ? `grok-${bundle.group.id}` : undefined;
-    const existingGroup = groupId ? listGroups().find((group) => group.id === groupId) : undefined;
-    if (existingGroup && [...existingGroup.members].sort().join("\n") !== targets.map((target) => target.name).sort().join("\n")) throw new InputError("This group was already imported with different members. Manage its membership in Linubot; importing does not replace an existing group.", 409);
-    pending.set(id, { bundle, options: { ...options }, targets, expires: Date.now() + 10 * 60_000, providerId: options.providerId, model: options.model?.trim() || "default", sourceKey: options.sourceId, groupId });
-    return { id, targets: targets.map((target) => ({ ...target })), group: bundle.group?.name, provider: { name: provider.name, id: provider.id, model, ready: Boolean(provider.apiKey) || provider.auth === "none" },
+    const id = randomUUID();
+    checkGroups(groups, targets);
+    pending.set(id, { bundle, options: { ...options }, targets, expires: Date.now() + 10 * 60_000, providerId: options.providerId, model: options.model?.trim() || "default", groups });
+    return { id, targets: targets.map((target) => ({ ...target })), group: bundle.group?.name, groups: groups.map(({ id, name }) => ({ id, name })), provider: { name: provider.name, id: provider.id, model, ready: Boolean(provider.apiKey) || provider.auth === "none" },
       bots: bundle.bots.map((bot, index) => ({ name: targets[index].name, originalName: bot.candidate.name, sourceModel: bot.model, sourceProvider: bot.provider, description: bot.candidate.description, soul: bot.soul,
         context: options.memory === false ? "" : bot.context, skills: bot.skills.map((skill) => ({ name: skill.name, description: skill.description, files: skill.files.length })), routines: options.routines ? bot.routines.map((routine) => ({ ...routine })) : [], messages: bot.messages.length })),
-      groupMessages: bundle.messages.length, warnings: [...bundle.warnings], expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() };
+      groupMessages: groups.reduce((sum, group) => sum + group.messages.length, 0), warnings: [...bundle.warnings], expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() };
+  }
+  function checkGroups(groups: Prepared["groups"], targets: Prepared["targets"]) {
+    const names = new Map(targets.map(target => [target.source, target.name]));
+    for (const group of groups) {
+      const existing = listGroups().find(value => value.id === group.id);
+      if (existing && [...existing.members].sort().join("\n") !== group.sources.map(source => names.get(source)).sort().join("\n")) throw new InputError("This group was already imported with different members. Manage its membership in Linubot; importing does not replace an existing group.", 409);
+    }
   }
   function commit(id: string): ImportResult {
     if (!uuid.test(id)) throw new InputError("Invalid import preview");
     const prior = readJson<ImportResult | null>(join(directory(), `${id}.json`), null); if (prior) return prior;
     const entry = pending.get(id); if (!entry || entry.expires < Date.now()) throw new InputError("Import preview expired. Preview the source again.", 409);
     getProvider(entry.providerId);
-    const { bundle, targets, options } = entry;
+    const { bundle, targets, options, groups } = entry;
+    checkGroups(groups, targets);
     const created: string[] = [], skills: string[] = [], routines: string[] = [], feeds: string[] = [];
     const sourceNames = new Map(targets.map((target) => [target.source, target.name]));
     for (const target of targets) if (target.existing && (!getBot(target.name) || metadata(target.name).source !== target.source)) throw new InputError("An existing import target changed. Preview the import again.", 409);
@@ -103,12 +126,13 @@ export function createAgentImports(roots: ImportRoots = {}) {
         }
         writeJson(join(dataDir(), "profiles", target.name, "import.json"), { source: target.source, kind: source.candidate.source, originalName: source.candidate.name, sourceModel: source.model, sourceProvider: source.provider, importedAt: new Date().toISOString(), receipt: id, skills: source.skills.map((skill) => skillName(target.name, skill.name, skill.key)), warnings: source.warnings });
       }
-      if (bundle.group && entry.groupId && !listGroups().some((group) => group.id === entry.groupId)) {
-        if (existsSync(join(dataDir(), `feed-group_${entry.groupId}.jsonl`))) throw new InputError("An imported group conversation already exists", 409);
-        writeJson(join(dataDir(), "groups.json"), [...listGroups(), { id: entry.groupId, name: bundle.group.name.slice(0, 80), members: targets.map((target) => target.name) }]);
-        importMessages(`group:${entry.groupId}`, bundle.messages, targets[0].name);
+      for (const group of groups) if (!listGroups().some(value => value.id === group.id)) {
+        if (existsSync(join(dataDir(), `feed-group_${group.id}.jsonl`))) throw new InputError("An imported group conversation already exists", 409);
+        const members = group.sources.map(source => sourceNames.get(source)!);
+        writeJson(join(dataDir(), "groups.json"), [...listGroups(), { id: group.id, name: group.name.slice(0, 80), members }]);
+        importMessages(`group:${group.id}`, group.messages, members[0]);
       }
-      const result: ImportResult = { id, scope: entry.groupId ? `group:${entry.groupId}` : `bot:${targets[0].name}`, bots: targets.map((target) => target.name), skills, routines, messages, warnings: bundle.warnings };
+      const result: ImportResult = { id, scope: groups.length ? `group:${groups[0].id}` : `bot:${targets[0].name}`, bots: targets.map((target) => target.name), groups: groups.map(({ id, name }) => ({ id, name })), skills, routines, messages, warnings: bundle.warnings };
       writeJson(join(directory(), `${id}.json`), result); pending.delete(id); return result;
     } catch (error) {
       for (const [path, value] of backups) { if (value) writeFileSync(path, value); else rmSync(path, { force: true }); }

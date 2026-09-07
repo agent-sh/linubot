@@ -16,4 +16,5 @@ arguments=()
 for argument in "$@"; do
   if [[ "$argument" != '--no-sandbox' ]]; then arguments+=("$argument"); fi
 done
-exec "$browser" "${arguments[@]}"
+# Restore tabs and session cookies when reopening this private browser profile.
+exec "$browser" --disable-background-mode --restore-last-session "${arguments[@]}"

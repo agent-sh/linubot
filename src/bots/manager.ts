@@ -1,3 +1,4 @@
+import { assertBrowserIdle, forgetBrowserProfiles } from "../computer/profiles.ts";
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -251,6 +252,8 @@ export function deleteBot(name: string, options: { detachReferences?: boolean } 
   const { groups, jobs, affected } = deletionReferences(name);
   const references = groups.some((group) => group.members.includes(name)) || jobs.some(affected);
   if (references && !options.detachReferences) throw new InputError(`bot is referenced by a group or job: ${name}`, 409);
+  assertBrowserIdle(`bot:${name}`);
+  for (const group of groups) if (group.members.length === 1 && group.members[0] === name) assertBrowserIdle(`group:${group.id}`);
   const sections = listSections();
   const updated = sections.map((section) => ({ ...section, bots: section.bots.filter((bot) => bot !== name) }));
   if (references) {
@@ -258,6 +261,8 @@ export function deleteBot(name: string, options: { detachReferences?: boolean } 
     writeJson(join(dataDir(), "jobs.json"), jobs.filter((job) => !affected(job)));
   }
   if (sections.some((section, i) => section.bots.length !== updated[i].bots.length)) writeJson(join(dataDir(), "sections.json"), updated);
+  forgetBrowserProfiles(`bot:${name}`);
+  for (const group of groups) if (group.members.length === 1 && group.members[0] === name) forgetBrowserProfiles(`group:${group.id}`);
   rmSync(dir, { recursive: true });
   return true;
 }

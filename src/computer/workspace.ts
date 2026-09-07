@@ -1,3 +1,4 @@
+import { browserProfile, standardBrowserSaved, saveStandardBrowser } from "./profiles.ts";
 import { execFile, spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
@@ -132,6 +133,7 @@ export function createComputer(run: Runner = defaultRunner) {
   };
   return {
     owned: () => ownedWorkspaces(),
+    standardBrowser(id: string): boolean { const owned = requireOwned(id); return Boolean(owned.scope && standardBrowserSaved(owned.scope)); },
     owns: (id: string): boolean => validId(id) && ownedWorkspaces().some((entry) => entry.id === id),
     doctor: (): Promise<string> => run(["doctor"]),
     async list(): Promise<string> {
@@ -152,12 +154,14 @@ export function createComputer(run: Runner = defaultRunner) {
       if (opts.dryRun !== undefined && typeof opts.dryRun !== "boolean") throw new InputError("dryRun must be a boolean");
       const id = opts.id === undefined ? `linubot-${randomUUID()}` : opts.id;
       if (!validId(id)) throw new InputError("workspace ID must be linubot-<UUID v4>");
-      const key = `${ownedPath()}:${id}`;
+      if (opts.scope && ownedWorkspaces().some(entry => entry.scope === opts.scope && entry.state === "running")) throw new InputError("This bot or group already has an open computer. Close it before starting another.", 409);
+      const key = `${ownedPath()}:${id}`, scopeKey = opts.scope ? `${ownedPath()}:${opts.scope}` : key;
+      if (opts.scope && starting.has(scopeKey)) throw new InputError("This bot or group already has a computer starting", 409);
       if (starting.has(key) || ownedWorkspaces().some((entry) => entry.id === id)) throw new InputError(`workspace already owned or starting: ${id}`, 409);
       const args = ["workspace", "start", "--ack-hidden-workspace", "--purpose", purpose, "--id", id];
       if (opts.width !== undefined) args.push("--width", String(integer(opts.width, "width", 1, 8192)));
       if (opts.height !== undefined) args.push("--height", String(integer(opts.height, "height", 1, 8192)));
-      starting.add(key);
+      starting.add(key); starting.add(scopeKey);
       try {
         // A start can silently attach to an existing backend workspace. Refuse that adoption.
         const preview = response(await run([...args, "--dry-run"]));
@@ -177,20 +181,37 @@ export function createComputer(run: Runner = defaultRunner) {
         writeJson(ownedPath(), [...ownedWorkspaces(), { ...handle, state: "running" }]);
         return { ...handle, dryRun: false };
       } finally {
-        starting.delete(key);
+        starting.delete(key); starting.delete(scopeKey);
       }
     },
     status,
     async stop(id: string): Promise<string> {
       const owned = requireOwned(id);
       if (owned.state === "stopped") return JSON.stringify({ ok: true, status: { id, ready: false }, message: "already stopped" });
+      // Close saved-profile browsers before the display is terminated so Chrome
+      // can flush cookies and session state to disk.
+      let browserWarning: string | undefined;
+      try { if (owned.scope) {
+        const current = JSON.parse(await status(id));
+        const profiles = [browserProfile(owned.scope, "standard"), browserProfile(owned.scope, "automated")];
+        const browsers = (current.status?.apps ?? []).filter((app: { running?: boolean; command?: string[] }) => app.running && app.command?.some(arg => profiles.some(profile => arg === `--user-data-dir=${profile}` || arg === profile)));
+        if (browsers.length) {
+          const windows = JSON.parse(await scoped(["windows"], id)).windows ?? [];
+          for (const app of browsers) {
+            const window = windows.find((window: { app_id?: string; pid?: number }) => app.id === window.app_id || app.pid === window.pid);
+            if (window) await scoped(["key-window", requiredText(window.id, "Browser window", 80), "ctrl+shift+q"], id, { timeoutMs: 5000 });
+          }
+          for (const app of browsers) await scoped(["wait-app", "--timeout-ms", "10000", requiredText(app.id, "Browser app", 80)], id, { timeoutMs: 11000 });
+        }
+      }
+      } catch { browserWarning = "The browser did not close normally. Its most recent session changes may not have been saved."; }
       const output = await scoped(["stop", "--timeout-ms", "30000"], id);
       const parsed = response(output);
       if (parsed.ok !== true || parsed.status?.id !== id || parsed.status.ready !== false || parsed.dry_run === true) {
         throw new Error("workspace stop did not confirm shutdown");
       }
       writeJson(ownedPath(), ownedWorkspaces().map((entry) => entry.id === id ? { ...entry, state: "stopped" } : entry));
-      return output;
+      return browserWarning ? JSON.stringify({ ...JSON.parse(output), warning: browserWarning }) : output;
     },
     async cleanup(id: string): Promise<string> {
       if (requireOwned(id).state !== "stopped") throw new InputError("stop the owned workspace before cleanup", 409);
@@ -273,14 +294,19 @@ export function createComputer(run: Runner = defaultRunner) {
       if (owned.state !== "running") throw new InputError("This computer has stopped", 409);
       const url = new URL(requiredText(value, "Website URL", 2000));
       if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new InputError("Use a website URL without embedded credentials");
-      const profile = join(resolve(dataDir()), "computer-browsers", id);
+      const profile = owned.scope ? browserProfile(owned.scope, "standard") : join(resolve(dataDir()), "computer-browsers", id);
       mkdirSync(profile, { recursive: true, mode: 0o700 });
       // Launch an ordinary browser through the owned desktop, without a DevTools
       // endpoint. Keep this separate from both host and automated browser profiles.
-      return scoped(["launch", "--name", "Sign-in browser", "--", process.env.LINUBOT_BROWSER_WRAPPER ?? fileURLToPath(new URL("../../desktop/linubot-chrome.sh", import.meta.url)),
+      const output = await scoped(["launch", "--name", "Sign-in browser", "--", process.env.LINUBOT_BROWSER_WRAPPER ?? fileURLToPath(new URL("../../desktop/linubot-chrome.sh", import.meta.url)),
         `--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", "--ozone-platform=x11", "--new-window", url.href], id, options);
+      if (owned.scope) saveStandardBrowser(owned.scope);
+      return output;
     },
-    openBrowser: (id: string): Promise<string> => scoped(["open-browser", "--browser", process.env.LINUBOT_BROWSER_WRAPPER ?? fileURLToPath(new URL("../../desktop/linubot-chrome.sh", import.meta.url))], id),
+    openBrowser: async (id: string): Promise<string> => {
+      const owned = requireOwned(id);
+      return scoped(["open-browser", "--browser", process.env.LINUBOT_BROWSER_WRAPPER ?? fileURLToPath(new URL("../../desktop/linubot-chrome.sh", import.meta.url)), ...(owned.scope ? ["--user-data-dir", browserProfile(owned.scope, "automated")] : [])], id);
+    },
     browserTargets: (id: string): Promise<string> => scoped(["browser-targets"], id),
     browserNavigate: async (url: string, id: string): Promise<string> => scoped(["browser-navigate", requiredText(url, "browser URL", 20000)], id),
     browserSnapshot: (id: string): Promise<string> => scoped(["browser-snapshot"], id),

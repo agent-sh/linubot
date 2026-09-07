@@ -1,7 +1,7 @@
 # Importing existing teammates
 
-Open **Add a bot → Import from Hermes or Grok Bot**. Choose a source, a Linubot
-name, and a provider/model. The preview shows the snapshot that will be imported.
+Open **Add a bot → Import from Hermes or Grok Bot**. Select one or more bots or groups, or use **Select all**. Choose a provider/model
+for the selection. A single bot can also be renamed before import. The preview shows the snapshot that will be imported.
 Changing an option invalidates that preview. Import creates native Linubot bots
 and conversations; it does not run the original agent or restart past tasks.
 
@@ -12,7 +12,7 @@ and conversations; it does not run the original agent or restart past tasks.
 | Memories | USER.md and MEMORY.md, kept with the imported bot | Cloud memory is unavailable |
 | Skills | Instructions and supporting files, as Library drafts | Cloud skills are unavailable |
 | History | Up to three recent conversations, at most 200 visible text messages each | Recent cached text messages |
-| Groups | Profiles imported individually | Group and all locally available members |
+| Groups | Select multiple profiles together | Group and all locally available members |
 | Routines | Compatible UTC cron prompts, imported paused | Cloud schedules are unavailable |
 | Logins and tools | Reconnect named MCP tools; credentials and approvals excluded | Cloud logins and permissions excluded |
 
@@ -29,8 +29,10 @@ Source-specific tool references may need editing for Linubot.
 
 An import never overwrites an existing teammate. Names get a suffix when needed;
 the preview shows the final names. Repeated imports reuse their teammates.
-Groups reuse members already brought over. Existing group membership is not
-synchronized or replaced. Preview tokens last ten minutes; only the reviewed
+A selection uses one preview and one commit. Overlapping group members appear
+once, and all selected groups retain their own membership. If a later item
+fails during commit, the entire selection rolls back. Groups reuse members already brought over.
+Existing group membership is not synchronized or replaced. Preview tokens last ten minutes; only the reviewed
 snapshot is committed. Failed commits roll back their new files and configuration
 changes. Successful receipts are retained locally.
 
@@ -47,7 +49,7 @@ Cloud-only instructions, workspace files, memories, skills and schedules cannot
 be recovered from it; the preview calls out these omissions. Source applications,
 databases, logins and running tasks are left in place.
 
-Imports are bounded to 24 MiB, 256 skills, bounded supporting-file bundles, and
+Select up to 100 sources per import. The combined snapshot is bounded to 24 MiB, 256 skills, bounded supporting-file bundles, and
 known regular files. Symlinks and unsafe destinations are refused or excluded.
 Optional components can be deselected. Other Hermes history remains in Hermes;
 Grok history is limited to the cached window. Scripts, non-UTC schedules and
@@ -66,4 +68,5 @@ Tests cover preview-only reads, source preservation, credential-file exclusion,
 isolated imported memory, draft skills with supporting files, paused routines,
 historical requests, name conflicts, unsafe files, retry idempotence and group
 speaker mapping. Desktop QA imports a Hermes profile, chats with the resulting
-native bot, then imports and opens a Grok group.
+native bot, then selects all sources together and verifies that previously imported bots and
+overlapping group members are reused.

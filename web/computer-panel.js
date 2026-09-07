@@ -42,7 +42,7 @@ export function computerPanel(ctx, button, beforeOpen) {
     button.classList.toggle("needs-attention", entries.some((item) => item.requested || item.manual));
     button.setAttribute("aria-expanded", String(!panel.hidden));
     button.title = entries.some((item) => item.manual) ? "Computer paused for you" : "Open the bot’s computer";
-    panel.querySelector("[data-hint]").textContent = token ? "Close this view whenever you need. The bot waits until you explicitly return control." : "Watch here, or take control to sign in yourself. Closing a watch-only view leaves the task running.";
+    panel.querySelector("[data-hint]").textContent = token ? "Close this view whenever you need. The bot waits until you explicitly return control. Website logins are saved for this bot or group." : "Watch here, or take control to sign in yourself. Closing a watch-only view leaves the task running.";
   }
   async function returnControl() {
     openingController?.abort();
@@ -175,7 +175,7 @@ export function computerPanel(ctx, button, beforeOpen) {
     if (point) sendInput({ action: "scroll", ...point, direction: event.deltaY < 0 ? "up" : "down", amount: Math.min(6, Math.max(1, Math.ceil(Math.abs(event.deltaY) / 100))) });
   }, { passive: false });
   panel.querySelector("[data-sign-in]").onclick = () => {
-    const modal = dialog("Open sign-in browser", '<p>Open the website you want to use, then sign in yourself. This regular browser stays in the bot’s computer. The bot continues from its screen after you return control.</p><form><label>Website URL<input name="url" type="url" placeholder="https://example.com" required></label><p class="field-hint">Use this when a site rejects the automated browser. Your main browser’s accounts are separate. The site may still restrict sign-in.</p><button type="submit" class="primary">Open website</button><div data-feedback hidden></div></form>');
+    const modal = dialog("Open sign-in browser", '<p>Open the website you want to use, then sign in yourself. This regular browser stays in the bot’s computer. The bot continues from its screen after you return control.</p><form><label>Website URL<input name="url" type="url" placeholder="https://example.com" required></label><p class="field-hint">Use this when a site rejects the automated browser. Logins are saved for this bot or group across tasks. Your main browser’s accounts are separate. The site may still restrict sign-in.</p><button type="submit" class="primary">Open website</button><div data-feedback hidden></div></form>');
     submit(modal.root.querySelector("form"), async (form) => {
       const url = new URL(form.get("url"));
       if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) throw new Error("Enter an http(s) website URL without credentials.");

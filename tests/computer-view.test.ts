@@ -49,7 +49,7 @@ async function fixture(intercept?: (args: string[], options: Parameters<Runner>[
 }
 
 describe("embedded owned computer control", () => {
-  it("opens a normal browser only under current owner control, preserves its mode and cleans its task profile", async () => {
+  it("opens a normal browser only under current owner control, preserves its mode and saves its bot profile", async () => {
     const { computer, view, calls } = await fixture(), ctrl = signal();
     process.env.LINUBOT_DATA = relative(process.cwd(), directory);
     await assert.rejects(() => view.input(ID, "no-token", { action: "sign-in-browser", url: "https://example.com" }), hasStatus(403));
@@ -60,12 +60,43 @@ describe("embedded owned computer control", () => {
     assert.equal(calls.filter(call => call.args[1] === "launch").length, 0);
     await view.input(ID, token, { action: "sign-in-browser", url: "https://example.com/login" });
     const launch = calls.find(call => call.args[1] === "launch")!.args;
-    assert.ok(launch.includes(`--user-data-dir=${join(directory, "computer-browsers", ID)}`));
+    assert.ok(launch.includes(`--user-data-dir=${join(directory, "computer-profiles", "bot_Viewer", "standard")}`));
     assert.ok(!launch.some(arg => /remote-debugging|enable-automation|headless|no-sandbox/.test(arg)));
     assert.equal(view.status(ID).standardBrowser, true);
     await view.release(ID, token); assert.equal(view.status(ID).standardBrowser, true);
     await computer.stop(ID); await computer.cleanup(ID);
-    assert.equal(existsSync(join(directory, "computer-browsers", ID)), false);
+    assert.equal(existsSync(join(directory, "computer-profiles", "bot_Viewer", "standard")), true);
+  });
+
+  it("keeps browser identity across task cleanup and a new adapter, isolates owners and refuses overlapping desktops", async () => {
+    const { computer, calls } = await fixture();
+    await computer.openSignInBrowser("https://example.com", ID);
+    const profile = calls.find(call => call.args[1] === "launch")!.args.find(arg => arg.startsWith("--user-data-dir="));
+    await assert.rejects(() => computer.start({ id: OTHER, scope: "bot:Viewer", purpose: "Overlap", acknowledge: true }), hasStatus(409));
+    await computer.stop(ID); await computer.cleanup(ID);
+    await computer.start({ id: OTHER, scope: "bot:Viewer", purpose: "Next task", acknowledge: true });
+    const restarted = createComputer(async args => { calls.push({ args, options: undefined }); return JSON.stringify({ ok: true }); });
+    assert.equal(restarted.standardBrowser(OTHER), true);
+    await restarted.openSignInBrowser("https://example.com/next", OTHER);
+    assert.ok(calls.at(-1)!.args.includes(profile!));
+    await computer.stop(OTHER); await computer.cleanup(OTHER);
+    await computer.start({ id: ID, scope: "group:Viewer", purpose: "Separate group", acknowledge: true });
+    assert.equal(computer.standardBrowser(ID), false);
+    await computer.openSignInBrowser("https://example.com", ID);
+    assert.ok(!calls.at(-1)!.args.includes(profile!));
+  });
+
+  it("still stops and releases the saved browser owner if graceful shutdown fails", async () => {
+    let lookupFails = true;
+    const { computer, calls } = await fixture(args => {
+      if (args[1] === "status" && lookupFails) throw new Error("Browser vanished");
+      return undefined;
+    });
+    const stopped = JSON.parse(await computer.stop(ID));
+    assert.match(stopped.warning, /did not close normally/);
+    assert.ok(calls.some(call => call.args[1] === "stop"));
+    await computer.cleanup(ID); lookupFails = false;
+    await computer.start({ id: OTHER, scope: "bot:Viewer", acknowledge: true, purpose: "Next task can start" });
   });
 
   it("rejects unowned frame, takeover, input and agent requests before reaching the runner", async () => {

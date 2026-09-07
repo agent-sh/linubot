@@ -239,7 +239,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
       }
       if (r[0] === "imports") {
         if (r[1] === "sources" && method === "GET") { ok(imports.discover()); return; }
-        if (r[1] === "preview" && method === "POST") { ok(imports.preview({ sourceId: requiredText(b.sourceId, "Source", 80), name: optionalText(b.name, "Name", 40), providerId: optionalText(b.providerId ?? undefined, "Provider", 80), model: optionalText(b.model, "Model", 200), memory: optionalBoolean(b.memory), skills: optionalBoolean(b.skills), history: optionalBoolean(b.history), routines: optionalBoolean(b.routines) })); return; }
+        if (r[1] === "preview" && method === "POST") { ok(imports.preview({ sourceId: optionalText(b.sourceId, "Source", 80), sourceIds: b.sourceIds === undefined ? undefined : textList(b.sourceIds, "Sources", 100, 80), name: optionalText(b.name, "Name", 40), providerId: optionalText(b.providerId ?? undefined, "Provider", 80), model: optionalText(b.model, "Model", 200), memory: optionalBoolean(b.memory), skills: optionalBoolean(b.skills), history: optionalBoolean(b.history), routines: optionalBoolean(b.routines) })); return; }
         if (r[1] === "commit" && method === "POST") { ok(imports.commit(requiredText(b.id, "Preview", 80))); return; }
       }
       if (r[0] === "bots") {
@@ -309,6 +309,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
       }
       if (r[0] === "runs") {
         if (r.length === 1 && method === "GET") { ok(listRuns({ bot: url.searchParams.get("bot") ?? undefined, scope: url.searchParams.get("scope") ?? undefined, limit: number(url.searchParams.get("limit"), 50, 1, 200) })); return; }
+        if (r.length === 3 && r[2] === "continue" && method === "POST") { ok({ runs: runtime.continueTask(r[1]) }); return; }
         if (r.length === 2 && method === "GET") { ok(getRun(r[1])); return; }
         if (r[2] === "feedback" && method === "POST") {
           ok(feedbackRun(r[1], { rating: requiredText(b.rating, "Rating", 20), note: optionalText(b.note, "Feedback", 4000), minutesSaved: b.minutesSaved as number | null | undefined })); return;

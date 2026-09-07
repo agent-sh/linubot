@@ -53,8 +53,8 @@ before asking you to sign in.
 
 The regular browser has a separate profile from your main desktop and the
 automated browser. Open the destination website first if it uses “Sign in with
-Google”; existing tabs and cookies are not transferred. Its cookies survive
-within the task, and its profile is removed when the task is cleaned up.
+Google”; existing tabs and cookies are not transferred. Its cookies and browser state are saved for this bot or group across tasks and
+app restarts. Once selected, later tasks use the regular browser too.
 
 This removes Linubot's remote browser automation from that browser. It does not
 guarantee that a site will accept a login: account, device and organization
@@ -66,11 +66,33 @@ configured by an embedding caller, approval waiting, manual control and context
 maintenance do not consume it. Individual model and tool requests retain their
 own timeouts. **Stop** still cancels the task when you explicitly ask.
 
+A run allows 200 model steps and 400 tool calls. If it reaches either limit,
+**Continue task** appears above the message box. It starts another run in the
+same conversation with the original request, success criteria and saved session
+context. The prior run stays in history. Saved browser profiles can be reopened;
+permissions that require approval must be granted again. Continue also works for
+saved failures from the old 30-step/60-call limits. Repeated clicks reuse the same
+continuation request.
+
 ## Lifetime and access
 
-The workspace and its disposable browser belong to the current task. They close
-and are cleaned up when that task ends. Hiding the panel does not extend their
-lifetime, and browser logins are not guaranteed to survive into another task.
+The desktop and its running applications close when the task ends. Browser
+profiles live separately under the Linubot data directory in
+`computer-profiles/bot_NAME/` or `computer-profiles/group_ID/`. Cookies, local
+storage and browser sessions are retained across tasks, computer restarts and
+application upgrades. Chrome is asked to quit before the desktop stops so it can
+save session changes. A forced shutdown may lose the newest changes.
+
+Each bot and group has its own profiles. Your personal Chrome profile is not
+used. Regular and automated browsers remain separate; an account signed into
+one does not automatically sign into the other. A site can expire a session or
+require you to authenticate again. Existing disposable profiles from older
+releases are not migrated while running; persistence starts when you sign in
+with this release. Other desktop applications are not suspended or restored.
+
+Deleting a bot or group removes its saved browser profiles, after its computer
+has stopped. Standalone workspaces created without a bot/group retain disposable
+browsers. Hiding the Computer panel does not change this lifetime.
 
 The workspace uses a separate display and input target from your main desktop.
 That separation is not, by itself, a filesystem or network sandbox. Initial

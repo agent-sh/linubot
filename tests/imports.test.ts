@@ -46,6 +46,34 @@ beforeEach(() => {
 afterEach(() => { if (prior === undefined) delete process.env.LINUBOT_DATA; else process.env.LINUBOT_DATA = prior; rmSync(root, { recursive: true, force: true }); });
 
 describe("agent import conversion", () => {
+  it("imports many sources in one snapshot, deduplicates group members and reuses successful receipts", () => {
+    const importer = createAgentImports({ hermes, grok });
+    const ids = importer.discover().candidates.map(source => source.id);
+    const preview = importer.preview({ sourceIds: [...ids, ids[0]], routines: true });
+    assert.equal(preview.bots.length, 3); assert.equal(preview.groups.length, 1); assert.equal(listBots().length, 0);
+    const result = importer.commit(preview.id);
+    assert.equal(listBots().length, 3); assert.equal(listGroups().length, 1);
+    assert.equal(new Set(listGroups()[0].members).size, 2);
+    assert.deepEqual(importer.commit(preview.id), result);
+    const again = importer.preview({ sourceIds: ids });
+    assert.ok(again.targets.every(target => target.existing)); importer.commit(again.id);
+    assert.equal(listBots().length, 3); assert.equal(listGroups().length, 1);
+  });
+
+  it("rolls back the whole selected import when a later bot fails", () => {
+    const importer = createAgentImports({ hermes, grok }), candidates = importer.discover().candidates;
+    const hermesId = candidates.find(source => source.source === "hermes")!.id;
+    const first = importer.commit(importer.preview({ sourceId: hermesId }).id);
+    const retained = join(process.env.LINUBOT_DATA!, "skills", first.skills[0], "SKILL.md"), original = readFileSync(retained);
+    rmSync(join(process.env.LINUBOT_DATA!, "profiles", first.bots[0]), { recursive: true });
+    rmSync(join(process.env.LINUBOT_DATA!, `feed-bot_${first.bots[0]}.jsonl`));
+    const preview = importer.preview({ sourceIds: [...candidates.filter(source => source.source === "grok").map(source => source.id), hermesId] });
+    assert.throws(() => importer.commit(preview.id), /skill name is already in use/);
+    assert.equal(listBots().length, 0); assert.equal(listGroups().length, 0);
+    assert.deepEqual(readFileSync(retained), original);
+    assert.equal(readdirSync(process.env.LINUBOT_DATA!).filter(name => name.startsWith("feed-")).length, 0);
+  });
+
   it("previews and converts a Hermes profile into a native bot without source mutation or shared-memory changes", async () => {
     const importer = createAgentImports({ hermes, grok }); const sources = importer.discover();
     assert.equal(sources.candidates.length, 4);

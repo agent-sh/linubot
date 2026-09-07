@@ -68,7 +68,7 @@ it("workspace input goes only to the owned ID and images follow all tool results
     screenshot: async (path: string, id: string) => { assert.equal(id, owned); writeFileSync(path, image); },
     windows: async (id: string) => { assert.equal(id, owned); return '{"windows":[]}'; },
     type: async (text: string, id: string) => { assert.equal(id, owned); effects.push(text); },
-    stop: async (id: string) => { assert.equal(id, owned); effects.push("stopped"); },
+    stop: async (id: string) => { assert.equal(id, owned); effects.push("stopped"); return '{"ok":true}'; },
     cleanup: async (id: string) => { assert.equal(id, owned); effects.push("cleaned"); },
   };
   let lastMessages: ChatMessage[] = [];
@@ -131,7 +131,7 @@ it("approval waiting pauses the execution budget until the owner decides", async
   process.env.LINUBOT_DATA = profile;
   setProvider({ kind: "openai-compat", baseUrl: "https://fixture.example/v1", model: "fixture", apiKey: "fixture-key" }); createBot("ApprovalClock");
   const id = "linubot-12345678-1234-4234-8234-123456789abc";
-  const computer = { owns: (value: string) => value === id, start: async () => ({ id }), stop: async () => {}, cleanup: async () => {} };
+  const computer = { owns: (value: string) => value === id, start: async () => ({ id }), stop: async () => '{"ok":true}', cleanup: async () => {} };
   let ready!: (event: FeedEvent) => void, modelSignal: AbortSignal | undefined, calls = 0;
   const pending = new Promise<FeedEvent>((resolve) => { ready = resolve; });
   const runtime = createAgentRuntime({ timeoutMs: 100, computer: computer as never, review: false, complete: async (_provider, _messages, _tools, signal) => {
@@ -168,4 +168,60 @@ it("normal tasks can exceed ten minutes and remain stoppable", async (t) => {
     runtime.stop("bot:LongTask"); assert.equal(currentSignal?.aborted, true);
     finish(); assert.equal((await runtime.wait(run.id)).status, "cancelled");
   } finally { finish(); await runtime.close(); t.mock.timers.reset(); process.env.LINUBOT_DATA = priorData; rmSync(profile, { recursive: true, force: true }); }
+});
+
+it("continues a budget-limited task after restart with its original brief and idempotent submission", async () => {
+  const profile = mkdtempSync(join(tmpdir(), "linubot-continue-")), priorData = process.env.LINUBOT_DATA;
+  process.env.LINUBOT_DATA = profile;
+  setProvider({ kind: "openai-compat", baseUrl: "https://fixture.example/v1", model: "fixture", apiKey: "fixture-key" }); createBot("Research");
+  let calls = 0;
+  const first = createAgentRuntime({ maxSteps: 2, review: false, complete: async () => ({ text: "", toolCalls: [{ id: `read-${++calls}`, name: "read_memory", arguments: "{}" }] }) });
+  let second: ReturnType<typeof createAgentRuntime> | undefined;
+  try {
+    const [initial] = first.enqueue({ scope: "bot:Research", message: "Browse and learn the project", criteria: ["Cover the source material"] });
+    const failed = await first.wait(initial.id); assert.equal(failed.status, "failed"); assert.match(failed.error ?? "", /2-step budget/);
+    await first.close();
+    second = createAgentRuntime({ review: false, complete: async (_provider, messages) => {
+      assert.ok(messages.some(message => message.content.includes("Browse and learn the project")));
+      assert.ok(messages.some(message => message.content.includes(`Continue unfinished task ${initial.id}`)));
+      assert.ok(messages.some(message => message.role === "tool" || message.content.includes("read_memory")), "The saved progress must be available");
+      return { text: "Finished the remaining research", toolCalls: [] };
+    } });
+    const [continued] = second.continueTask(initial.id);
+    assert.equal(continued.resumedFrom, initial.id); assert.deepEqual(continued.criteria, initial.criteria);
+    assert.equal(second.continueTask(initial.id)[0].id, continued.id);
+    const result = await second.wait(continued.id); assert.equal(result.status, "completed", result.error ?? "");
+    assert.equal(result.response, "Finished the remaining research");
+    assert.throws(() => second!.continueTask(continued.id), /did not stop at an execution limit/);
+  } finally { await first.close(); await second?.close(); process.env.LINUBOT_DATA = priorData; rmSync(profile, { recursive: true, force: true }); }
+});
+
+it("continuation retains automated-source memory restrictions", async () => {
+  const profile = mkdtempSync(join(tmpdir(), "linubot-continue-authority-")), priorData = process.env.LINUBOT_DATA;
+  process.env.LINUBOT_DATA = profile;
+  setProvider({ kind: "openai-compat", baseUrl: "https://fixture.example/v1", model: "fixture", apiKey: "fixture-key" }); createBot("Scheduled");
+  let calls = 0;
+  const runtime = createAgentRuntime({ maxSteps: 1, review: false, complete: async (_provider, _messages, tools) => {
+    assert.ok(!tools.some(tool => tool.name === "memory"));
+    return ++calls === 1 ? { text: "", toolCalls: [{ id: "read", name: "read_memory", arguments: "{}" }] } : { text: "Finished", toolCalls: [] };
+  } });
+  try {
+    const [first] = runtime.enqueue({ scope: "bot:Scheduled", message: "An automated research brief", source: "cron", from: "cron:research" });
+    await runtime.wait(first.id);
+    const [continued] = runtime.continueTask(first.id);
+    assert.equal(continued.source, "cron"); assert.equal(continued.userAuthored, false);
+    assert.equal((await runtime.wait(continued.id)).status, "completed");
+  } finally { await runtime.close(); process.env.LINUBOT_DATA = priorData; rmSync(profile, { recursive: true, force: true }); }
+});
+
+it("normal research can execute beyond the old 30-step limit", async () => {
+  const profile = mkdtempSync(join(tmpdir(), "linubot-long-research-")), priorData = process.env.LINUBOT_DATA;
+  process.env.LINUBOT_DATA = profile;
+  setProvider({ kind: "openai-compat", baseUrl: "https://fixture.example/v1", model: "fixture", apiKey: "fixture-key" }); createBot("LongResearch");
+  let calls = 0;
+  const runtime = createAgentRuntime({ review: false, complete: async () => ++calls <= 35 ? { text: "", toolCalls: [{ id: `research-${calls}`, name: "read_memory", arguments: "{}" }] } : { text: "Research complete", toolCalls: [] } });
+  try {
+    const [run] = runtime.enqueue({ scope: "bot:LongResearch", message: "Complete the extended research" });
+    const result = await runtime.wait(run.id); assert.equal(result.status, "completed", result.error ?? ""); assert.equal(result.toolCalls, 35);
+  } finally { await runtime.close(); process.env.LINUBOT_DATA = priorData; rmSync(profile, { recursive: true, force: true }); }
 });
