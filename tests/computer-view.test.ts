@@ -74,6 +74,19 @@ describe("embedded owned computer control", () => {
     assert.deepEqual(events, ["agent-start", "agent-end", "next-agent"]); assert.equal(view.blocked(ID), false);
   });
 
+  it("pastes multiline text without synthesizing Enter and clears its clipboard before resuming", async () => {
+    const { view, calls } = await fixture();
+    const ctrl = signal(), { token } = await view.take(ID, ctrl.signal); calls.length = 0;
+    await view.input(ID, token, { action: "paste", text: "fixture-first\nfixture-second" });
+    assert.deepEqual(calls.map((call) => call.args[1]), ["clipboard-set", "key"]);
+    assert.equal(calls[0].args.at(-1), "fixture-first\nfixture-second");
+    assert.equal(calls[1].args.at(-1), "ctrl+v");
+    await view.release(ID, token);
+    assert.equal(calls.at(-1)?.args[1], "clipboard-set");
+    assert.equal(calls.at(-1)?.args.at(-1), " ");
+    assert.equal(view.status(ID).manual, false);
+  });
+
   it("serializes agent actions and rejects actions chosen from a revision preceding human input", async () => {
     const { view } = await fixture(), ctrl = signal(), gate = deferred(), started = deferred(); cleanup.push(() => gate.resolve());
     let executing = 0, maxExecuting = 0;
@@ -276,6 +289,7 @@ describe("embedded computer HTTP control", () => {
     assert.deepEqual(views.workspaces.map((entry: { id: string }) => entry.id), [ID]);
     assert.equal((await post("/input", { id: ID, token: "stale-token", action: "key", keys: "Return" })).status, 403);
     const taken = await post("/control", { id: ID, action: "take" }); assert.equal(taken.status, 200); const { token } = await taken.json();
+    assert.equal(app.hasActiveWork(), true); assert.throws(() => app.freezeForUpdate(), hasStatus(409));
     assert.equal((await post("/input", { id: OTHER, token, action: "key", keys: "Return" })).status, 403);
     calls.length = 0;
     assert.equal((await post("/input", { id: ID, token, action: "type", text: "private-login-fixture" })).status, 200);
@@ -284,6 +298,7 @@ describe("embedded computer HTTP control", () => {
     assert.doesNotMatch(status, new RegExp(`${token}|private-login-fixture`));
     const frame = await fetch(`${base}/frame?id=${ID}`, { headers }); assert.equal(frame.status, 200); assert.equal(frame.headers.get("content-type"), "image/png"); assert.equal(frame.headers.get("cache-control"), "no-store"); assert.deepEqual(Buffer.from(await frame.arrayBuffer()), PNG);
     assert.equal((await post("/control", { id: ID, action: "release", token })).status, 200);
+    assert.equal(app.hasActiveWork(), false);
     assert.equal((await post("/input", { id: ID, token, action: "click", x: 0, y: 0 })).status, 403);
     assert.equal(existsSync(join(directory, "live-frames", `${ID}.png`)), false);
   });

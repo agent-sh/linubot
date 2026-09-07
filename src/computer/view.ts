@@ -15,6 +15,7 @@ interface Control {
   agent: Promise<void>;
   input: Promise<void>;
   pendingInput: number;
+  clipboardDirty?: boolean;
   frame?: Promise<Buffer>;
   closed?: boolean;
   abort: AbortController;
@@ -56,6 +57,7 @@ export function createWorkspaceView(computer: ReturnType<typeof createComputer>)
   return {
     subscribe(id: string, listener: (blocked: boolean) => void) { const entry = state(id); entry.listeners.add(listener); listener(Boolean(entry.token || entry.requested)); return () => entry.listeners.delete(listener); },
     status(id: string) { const entry = state(id); return { manual: Boolean(entry.token), requested: entry.requested, revision: entry.revision }; },
+    busy: () => [...controls.values()].some((entry) => Boolean(entry.token || entry.requested || entry.pendingInput)),
     revision: (id: string) => state(id).revision,
     blocked: (id: string) => { const entry = state(id); return Boolean(entry.token || entry.requested); },
     wait,
@@ -91,9 +93,14 @@ export function createWorkspaceView(computer: ReturnType<typeof createComputer>)
     async release(id: string, token: string) {
       const entry = state(id);
       if (!entry.token || entry.token !== token) throw new InputError("This control session is no longer active", 409);
-      await entry.input;
-      if (entry.token !== token) throw new InputError("This control session changed", 409);
-      entry.token = undefined; entry.requested = undefined; entry.revision++; changed(entry);
+      const release = entry.input.then(async () => {
+        if (entry.token !== token) throw new InputError("This control session changed", 409);
+        if (entry.clipboardDirty) { await computer.clearClipboard(id, { signal: entry.abort.signal, timeoutMs: 5000 }); entry.clipboardDirty = false; }
+        if (entry.token !== token) throw new InputError("This control session changed", 409);
+        entry.token = undefined; entry.requested = undefined; entry.revision++; changed(entry);
+      });
+      entry.input = release.catch(() => {});
+      await release;
     },
     async request(id: string, reason: string, signal: AbortSignal) {
       const entry = state(id);
@@ -113,13 +120,18 @@ export function createWorkspaceView(computer: ReturnType<typeof createComputer>)
           switch (action.action) {
             case "click": await computer.click(action.x as number, action.y as number, id, { button: action.button as number | undefined, signal: entry.abort.signal, timeoutMs: 5000 }); break;
             case "drag": await computer.drag(action.fromX as number, action.fromY as number, action.toX as number, action.toY as number, id, { signal: entry.abort.signal, timeoutMs: 5000 }); break;
+            case "paste":
+              if (typeof action.text !== "string" || action.text.length > 16000) throw new InputError("Pasted text is too long");
+              entry.clipboardDirty = true;
+              await computer.paste(action.text, id, { signal: entry.abort.signal, timeoutMs: 5000 }); break;
             case "type":
               if (typeof action.text !== "string" || action.text.length > 16000) throw new InputError("Input text is too long");
-              await computer.type(action.text, id); break;
+              if (action.text.startsWith("-")) entry.clipboardDirty = true;
+              await computer.type(action.text, id, { signal: entry.abort.signal, timeoutMs: 5000 }); break;
             case "key":
               if (typeof action.keys !== "string" || action.keys.length > 100 || !/^[A-Za-z0-9_+]+$/.test(action.keys)) throw new InputError("Unsupported key");
-              await computer.key(action.keys, id); break;
-            case "scroll": await computer.scroll(action.x as number, action.y as number, action.direction as "up" | "down" | "left" | "right", id, action.amount as number | undefined); break;
+              await computer.key(action.keys, id, { signal: entry.abort.signal, timeoutMs: 5000 }); break;
+            case "scroll": await computer.scroll(action.x as number, action.y as number, action.direction as "up" | "down" | "left" | "right", id, action.amount as number | undefined, { signal: entry.abort.signal, timeoutMs: 5000 }); break;
             default: throw new InputError("Unsupported computer input");
           }
         } catch { throw new InputError("Computer input failed. Check that the workspace is still running.", 502); }

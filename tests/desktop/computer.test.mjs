@@ -69,7 +69,13 @@ test('embedded computer supports takeover, fresh input, closing, and direct bot 
     mkdirSync('test-results', { recursive: true });
     await page.screenshot({ path: 'test-results/embedded-computer.png', fullPage: true });
     await panel.getByRole('button', { name: 'Close computer', exact: true }).click();
-    await expect(panel).toBeHidden(); expect(manual).toBe(false);
+    await expect(panel).toBeHidden(); expect(manual).toBe(true);
+    await toggle.click();
+    await expect(screen).toHaveClass(/controlling/);
+    await panel.getByRole('button', { name: 'Return to bot', exact: true }).click();
+    expect(manual).toBe(false);
+    await panel.getByRole('button', { name: 'Close computer', exact: true }).click();
+    await expect(panel).toBeHidden();
     await page.getByLabel('Bot options', { exact: true }).click();
     await page.locator('.conversation-menu').getByRole('button', { name: 'Delete bot', exact: true }).click();
     await expect(page.getByRole('dialog')).toContainText('1 group');

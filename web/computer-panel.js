@@ -37,8 +37,10 @@ export function computerPanel(ctx, button, beforeOpen) {
     screen.tabIndex = token && frameReady ? 0 : -1;
     screen.classList.toggle("controlling", Boolean(token && frameReady));
     panel.querySelector("[data-state]").textContent = token ? frameReady ? "You’re in control. The bot is paused." : "Waiting for a fresh computer view. Input is paused." : current?.requested ? `Needs you: ${current.requested}` : current?.manual ? "User control is active. Take control here to continue." : current ? "Watching the bot’s computer" : "";
-    button.classList.toggle("needs-attention", entries.some((item) => item.requested));
+    button.classList.toggle("needs-attention", entries.some((item) => item.requested || item.manual));
     button.setAttribute("aria-expanded", String(!panel.hidden));
+    button.title = entries.some((item) => item.manual) ? "Computer paused for you" : "Open the bot’s computer";
+    panel.querySelector("[data-hint]").textContent = token ? "Close this view whenever you need. The bot waits until you explicitly return control." : "Watch here, or take control to sign in yourself. Closing a watch-only view leaves the task running.";
   }
   async function returnControl() {
     openingController?.abort();
@@ -101,7 +103,10 @@ export function computerPanel(ctx, button, beforeOpen) {
   }
   async function close() {
     try {
-      await returnControl();
+      openingController?.abort();
+      giveBack.disabled = true;
+      await inputQueue;
+      giveBack.disabled = false;
       panel.hidden = true; panel.classList.remove("wide"); layout.classList.remove("computer-open");
       sequence++; clearFrame(); controls(); button.focus(); return true;
     } catch (error) { feedback(panel, error.message); return false; }
@@ -161,7 +166,7 @@ export function computerPanel(ctx, button, beforeOpen) {
   screen.onpointercancel = () => { pointerDown = undefined; };
   screen.oncontextmenu = (event) => event.preventDefault();
   screen.addEventListener("keydown", (event) => { if (!token) return; event.stopPropagation(); if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") return; event.preventDefault(); sendInput(computerKey(event)); });
-  screen.addEventListener("paste", (event) => { if (!token) return; event.preventDefault(); sendInput({ action: "type", text: event.clipboardData.getData("text/plain").slice(0, 16000) }); });
+  screen.addEventListener("paste", (event) => { if (!token) return; event.preventDefault(); sendInput({ action: "paste", text: event.clipboardData.getData("text/plain").slice(0, 16000) }); });
   screen.addEventListener("wheel", (event) => {
     if (!token || !frameReady) return;
     event.preventDefault(); const point = screenPoint(event, screen);
@@ -169,12 +174,11 @@ export function computerPanel(ctx, button, beforeOpen) {
   }, { passive: false });
   panel.querySelector("[data-paste]").onclick = () => {
     const modal = dialog("Paste into the computer", '<form><label>Text<textarea name="text" rows="4" maxlength="16000" spellcheck="false" autocomplete="off" autofocus></textarea></label><p class="field-hint">This is typed into the workspace, without adding it to the conversation.</p><div data-feedback hidden></div><div class="form-actions"><button type="submit" class="primary">Paste into computer</button></div></form>');
-    submit(modal.root.querySelector("form"), async (data) => { await input({ action: "type", text: data.get("text") }); if (modal.alive()) modal.close(); screen.focus(); });
+    submit(modal.root.querySelector("form"), async (data) => { await input({ action: "paste", text: data.get("text") }); if (modal.alive()) modal.close(); screen.focus(); });
   };
   ctx.onCleanup(() => {
     disposed = true; openingController?.abort(); clearTimeout(statusTimer); sequence++; clearFrame();
-    const id = selected, held = token;
-    if (held) void inputQueue.finally(() => post("/api/computer/control", { id, token: held, action: "release" })).catch(() => {});
+    // Manual ownership remains paused across navigation; a reopened panel can reclaim it.
   });
   void refresh();
   return { close };

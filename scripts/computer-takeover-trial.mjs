@@ -69,13 +69,18 @@ try {
   await panel.getByRole('button', { name: 'Take control', exact: true }).click();
   await expect(screen).toHaveClass(/controlling/, { timeout: 30000 });
   await panel.getByRole('button', { name: 'Expand', exact: true }).click();
-  await screen.click(); await screen.pressSequentially(password, { delay: 100 }); await screen.press('Enter');
+  await screen.click(); await screen.pressSequentially(password.slice(0, 8), { delay: 100 });
+  await panel.getByRole('button', { name: 'Paste text', exact: true }).click();
+  await page.getByRole('textbox', { name: 'Text', exact: true }).fill(password.slice(8));
+  await page.getByRole('button', { name: 'Paste into computer', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeHidden();
+  await screen.press('Enter');
   await expect.poll(() => accepted && authenticatedReads > 0, { timeout: 30000 }).toBe(true);
   receipt.loginAccepted = true;
   mkdirSync('test-results/live', { recursive: true });
   await page.screenshot({ path: 'test-results/live/computer-signed-in.png', fullPage: true });
   await panel.getByRole('button', { name: 'Return to bot', exact: true }).click();
-  await expect(page.locator('.message-body').filter({ hasText: 'LOGIN_HANDOFF_OK' })).toBeVisible({ timeout: 30000 });
+  await expect(page.locator('.message:not(.user-message) .message-body').filter({ hasText: 'LOGIN_HANDOFF_OK' })).toBeVisible({ timeout: 30000 });
   await expect.poll(async () => page.evaluate(async () => {
     const runs = await fetch('/api/runs?bot=LoginHelper').then((r) => r.json());
     return runs.length > 0 && runs.every((run) => ['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status));

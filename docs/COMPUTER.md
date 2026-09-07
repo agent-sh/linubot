@@ -19,7 +19,8 @@ select the one you want from the panel's workspace menu.
 
 The bot continues from the current screen. It cannot execute a computer action
 chosen from a screen that predates your takeover without observing again.
-Closing the panel while you have control also returns control to the bot.
+Closing or navigating away while you have control keeps the bot paused. Reopen
+Computer and return control explicitly when you are finished.
 
 Input pauses when a fresh screen is unavailable. If the view changes or expires
 while input is queued, that input is rejected with a visible message. Wait for
@@ -36,7 +37,8 @@ control. You do not need to put a password or a “done” message in chat.
 Enter passwords only in the intended site's form inside the workspace. Live
 viewer frames and your manual input are not appended as user messages or model
 tool arguments in the session. Finish private entry before returning control:
-the bot then observes the current screen, and those subsequent observations can
+the temporary workspace clipboard used for pasted text is cleared, and the bot
+then observes the current screen. Those subsequent observations can
 be retained in its normal task activity and sent to the selected model.
 
 Time spent waiting for your control does not consume the bot's ordinary task

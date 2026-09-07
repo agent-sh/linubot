@@ -4,6 +4,16 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.7.0
+
+Checked on 2026-09-07: 293 source tests and four packaged desktop scenarios
+passed. A real Chromium sign-in through the embedded panel passed with both a
+fixture model and ChatGPT. The bot waited for the owner, continued the same task,
+and cleaned up its workspace; the password was absent from conversation logs.
+Control-race tests cover deadlines, stale frames/actions, clipboard clearing,
+shutdown and ownership recovery. Deletion checks cover group work and routine
+deliveries as well as preservation of unrelated data.
+
 ## Release acceptance: 2.6.1
 
 Checked on 2026-09-07:

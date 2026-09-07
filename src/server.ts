@@ -585,10 +585,10 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     scheduler.unref();
   });
   return { server, runtime, freezeForUpdate() {
-    if (runtime.busy() || evaluations.size || jobsRunning) throw new InputError("Finish active tasks before upgrading Linubot", 409);
+    if (runtime.busy() || workspaceView.busy() || evaluations.size || jobsRunning) throw new InputError("Finish active tasks before upgrading Linubot", 409);
     updating = true; runtime.pauseAdmissions(true);
     return () => { updating = false; runtime.pauseAdmissions(false); };
-  }, hasActiveWork: () => runtime.busy() || evaluations.size > 0 || Boolean(jobsRunning), async close() {
+  }, hasActiveWork: () => runtime.busy() || workspaceView.busy() || evaluations.size > 0 || Boolean(jobsRunning), async close() {
     stopping = true;
     clearInterval(scheduler);
     evaluations.forEach((controller) => controller.abort(new Error("Server is stopping")));

@@ -232,24 +232,31 @@ export function createComputer(run: Runner = defaultRunner) {
     focusWindow: async (title: string, id: string): Promise<string> => scoped(["focus-window", "--title", requiredText(title, "window title", 2000)], id),
     click: async (x: number, y: number, id: string, options: CommandOptions & { button?: number } = {}): Promise<string> => scoped(["click", ...(options.button === undefined ? [] : ["--button", String(integer(options.button, "button", 1, 3))]), String(integer(x, "x", 0, 65535)), String(integer(y, "y", 0, 65535))], id, options),
     drag: async (fromX: number, fromY: number, toX: number, toY: number, id: string, options?: CommandOptions): Promise<string> => scoped(["drag", ...[fromX, fromY, toX, toY].map((value) => String(integer(value, "coordinate", 0, 65535)))], id, options),
-    type: async (text: string, id: string): Promise<string> => {
+    type: async (text: string, id: string, options?: CommandOptions): Promise<string> => {
       if (typeof text !== "string" || text.length > 65536 || text.includes("\0")) throw new InputError("input text must be a string of at most 65536 characters without NUL");
       if (text.startsWith("-")) {
         // This backend's xdotool type path treats a leading dash as an option.
         // The owned clipboard transports literal text without that second parser.
-        await scoped(["clipboard-set", text], id);
-        return scoped(["key", "ctrl+v"], id);
+        await scoped(["clipboard-set", text], id, options);
+        return scoped(["key", "ctrl+v"], id, options);
       }
-      return scoped(["type", text], id);
+      return scoped(["type", text], id, options);
     },
-    key: async (keys: string, id: string): Promise<string> => {
+    paste: async (text: string, id: string, options?: CommandOptions): Promise<string> => {
+      if (typeof text !== "string" || text.length > 16000 || text.includes("\0")) throw new InputError("Invalid pasted text");
+      await scoped(["clipboard-set", text], id, options);
+      return scoped(["key", "ctrl+v"], id, options);
+    },
+    // The public backend rejects zero-length clipboard values; a blank removes the transferred secret.
+    clearClipboard: async (id: string, options?: CommandOptions): Promise<string> => scoped(["clipboard-set", " "], id, options),
+    key: async (keys: string, id: string, options?: CommandOptions): Promise<string> => {
       const value = requiredText(keys, "keys", 2000);
       if (value.startsWith("-")) throw new InputError("Use a key name or combination, not command flags");
-      return scoped(["key", value], id);
+      return scoped(["key", value], id, options);
     },
-    scroll: async (x: number, y: number, direction: "up" | "down" | "left" | "right", id: string, amount = 3): Promise<string> => {
+    scroll: async (x: number, y: number, direction: "up" | "down" | "left" | "right", id: string, amount = 3, options?: CommandOptions): Promise<string> => {
       if (!["up", "down", "left", "right"].includes(direction)) throw new InputError("invalid scroll direction");
-      return scoped(["scroll", "--amount", String(integer(amount, "scroll amount", 1, 255)), String(integer(x, "x", 0, 65535)), String(integer(y, "y", 0, 65535)), direction], id);
+      return scoped(["scroll", "--amount", String(integer(amount, "scroll amount", 1, 255)), String(integer(x, "x", 0, 65535)), String(integer(y, "y", 0, 65535)), direction], id, options);
     },
     async openViewer(id: string, opts: { inputForwarding?: boolean } = {}): Promise<string> {
       requireOwned(id);

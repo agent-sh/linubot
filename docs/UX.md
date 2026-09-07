@@ -34,8 +34,9 @@ pointer, keyboard, paste, scroll or drag input. The bot can also request a
 private login step; the request stays visible until the user handles it.
 Passwords belong in the workspace's login page, never in chat.
 
-**Return to bot** resumes work from the current screen. Closing the panel returns
-control and leaves the task running. Live viewer frames and manual input are
+**Return to bot** resumes work from the current screen. Closing a watch-only
+panel leaves the task running; closing during manual control keeps the bot
+paused until the user returns control explicitly. Live viewer frames and manual input are
 not added as user messages; the bot's subsequent observations use its normal
 activity history. Workspaces remain scoped to the task and close when it ends.
 See [computer controls](COMPUTER.md) for the full flow and privacy boundary.
