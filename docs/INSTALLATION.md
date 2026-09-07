@@ -1,0 +1,180 @@
+# Installation
+
+Linubot runs as an Electron application on a Linux desktop. The desktop starts
+its own local backend; you do not need a browser tab or a separate server.
+
+## Install a release
+
+The standard release targets **Linux x86-64, Ubuntu 26.04 / glibc 2.43 or newer**.
+It includes Electron/Node, the workspace backend and Python extension runners.
+You still need the desktop GUI libraries and system utilities used by computer
+workspaces. A prebuilt installation does not require Node or npm to build the app.
+
+Download the [installer](../install.sh) with curl:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/agent-sh/linubot/main/install.sh -o /tmp/linubot-install.sh
+bash /tmp/linubot-install.sh --launch
+```
+
+Or use wget:
+
+```sh
+wget -qO /tmp/linubot-install.sh https://raw.githubusercontent.com/agent-sh/linubot/main/install.sh
+bash /tmp/linubot-install.sh --launch
+```
+
+Run it as your desktop user, without sudo. The installer needs Bash, curl or
+wget, tar, sha256sum, flock and realpath. It downloads the latest stable release
+archive and verifies it against that release's `SHA256SUMS` before installation.
+It does not install system packages for you.
+
+Application versions live under `~/.local/opt/linubot-VERSION`, with
+`~/.local/opt/linubot` selecting the active version. The installer creates
+`~/.local/bin/linubot` and an application-menu entry. Earlier version directories
+are retained, and application data stays in its separate location.
+
+To pin a release instead of selecting the latest:
+
+```sh
+bash /tmp/linubot-install.sh --version 2.6.0 --launch
+```
+
+The sidebar offers upgrades when a newer suitable release exists. See
+[updates](UPDATES.md) for managed installations and manual upgrades.
+
+## Run from source
+
+Install Git, Node.js 24 or newer and npm. Use a supported Linux desktop with
+[Electron's system libraries](https://www.electronjs.org/docs/latest/tutorial/quick-start).
+The package manifest lists the Debian runtime dependencies.
+
+On Ubuntu 26.04, the desktop GUI libraries are available through:
+
+```sh
+sudo apt install libgtk-3-0t64 libnss3 libxss1 libxtst6 \
+  libatspi2.0-0t64 libdrm2 libgbm1 libasound2t64
+```
+
+With Git, Node and npm ready, clone and start the app:
+
+```sh
+git clone https://github.com/agent-sh/linubot.git
+cd linubot
+npm ci
+npm start
+```
+
+In **Settings**, add a provider and select a model. **Add a bot** creates a
+helper with a role and mascot. Send a simple message to verify the connection
+before attaching tools or importing an existing teammate.
+
+Chat and model-backed features can run without the computer workspace backend.
+Web access needs a network connection. Remote MCP packages and Python extensions
+have additional prerequisites below.
+
+The installer can also build a tagged release:
+
+```sh
+bash /tmp/linubot-install.sh --version 2.6.0 --build --launch
+```
+
+This needs Git, Node.js 24+, npm and the Electron GUI libraries. It builds the
+desktop from the selected tag without bundling the workspace and uv executables;
+install those locally if needed. A source build needs its own validation on the
+target distribution and does not automatically qualify older Linux systems.
+The upgrade button opens the release page for these source builds; rerun the
+installer with `--build` to compile a newer tag.
+If the same version already exists in a different build mode, the installer
+refuses to substitute it. Use a separate `LINUBOT_INSTALL_ROOT` for the other
+build.
+
+## Computer tasks and extensions
+
+Install [agent-workspace-linux](https://github.com/agent-sh/agent-workspace-linux)
+and its documented Linux dependencies. Make its executable available on `PATH`,
+or select its absolute path for development:
+
+```sh
+LINUBOT_WORKSPACE_BIN=/path/to/agent-workspace-linux npm start
+```
+
+Run `agent-workspace-linux doctor` to check the machine's display utilities,
+browser and sandbox support. Linubot uses an owned X11 workspace even when your
+main desktop uses Wayland. Chromium or Google Chrome is required for its browser.
+
+Keep npm available for reviewed npm-based MCP servers. Install
+[uv](https://docs.astral.sh/uv/getting-started/installation/) for Python-based
+extensions; `uvx` is the extension runner. Draft skills are instructions and
+supporting files, and installing a skill does not execute its scripts.
+
+## Build a Debian package
+
+The current package configuration targets **Linux x86-64 with glibc 2.43 or
+newer**, including Ubuntu 26.04. Packaging does not make arbitrary locally
+compiled binaries portable to older systems.
+
+The packager bundles the workspace executable plus `uv` and `uvx`. By default,
+all three are read from `~/.local/bin`. To use another location:
+
+```sh
+LINUBOT_WORKSPACE_BIN=/path/to/agent-workspace-linux \
+LINUBOT_UV_DIR=/path/to/uv-directory \
+npm run package:linux
+```
+
+`LINUBOT_UV_DIR` must contain both `uv` and `uvx`. The package includes their
+recorded versions, SHA-256 hashes and license texts. Building requires network
+access for dependency/license downloads and a compatible workspace binary.
+
+Outputs are under `release/`: a Debian installer named for the package version
+and an unpacked application at `release/linux-unpacked/linubot`. Install a
+specific built installer with your package manager:
+
+```sh
+sudo apt install ./release/linubot-2.6.0-amd64.deb
+```
+
+For a user installation with versioned directories, use the release installer
+or its `--build` option above. To test a local unpacked candidate directly, launch
+`release/linux-unpacked/linubot` with a separate data directory and Electron
+profile. Conversations and settings remain separate from application files.
+
+## Data and profiles
+
+| Setting | Purpose |
+| --- | --- |
+| `LINUBOT_DATA` | Application data directory; overrides the default |
+| `XDG_DATA_HOME` | Desktop data defaults to `$XDG_DATA_HOME/linubot` when set |
+| `LINUBOT_DESKTOP_PROFILE` | Separate Electron profile, useful for isolated tests |
+| `LINUBOT_WORKSPACE_BIN` | Workspace executable for development and packaging |
+| `LINUBOT_UV_DIR` | Directory containing the `uv` and `uvx` binaries for packaging |
+| `LINUBOT_INSTALL_ROOT` | Parent directory for versioned user installations; defaults to `~/.local/opt` |
+
+Without an override, desktop data is `~/.local/share/linubot`. The Linubot menu
+can open this folder. Keep it private: conversations, memories, artifacts and
+tool observations may contain sensitive information. Back up the complete data
+directory while the app is closed. Encrypted credentials may depend on the
+original Linux keyring and may need reconnecting on another machine.
+
+For a separate trial profile, use paths you control:
+
+```sh
+LINUBOT_DATA=/path/to/trial-data \
+LINUBOT_DESKTOP_PROFILE=/path/to/trial-desktop-profile \
+npm start
+```
+
+## Troubleshooting
+
+- **Electron does not open:** check the terminal output and install missing GUI
+  libraries. Keep Electron's sandbox enabled.
+- **Computer tools are unavailable:** check the workspace executable and run its
+  doctor command. Verify X11 utilities and a Chromium-based browser are installed.
+- **An endpoint has no models:** check the base URL, protocol and authentication;
+  use a custom model ID when the provider does not expose a catalog.
+- **A packaged binary reports a glibc error:** use the supported baseline or
+  rebuild the bundled dependencies against the intended target. Changing the
+  package's dependency declaration alone is insufficient.
+- **A routine is not running after closing the window:** enable the optional
+  background mode. Quitting the application stops task execution.

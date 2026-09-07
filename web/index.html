@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f3ed">
+  <meta name="color-scheme" content="light">
+  <title>linubot | Your local team</title>
+  <link rel="icon" href="/assets/icon.png">
+  <link rel="stylesheet" href="/style.css">
+  <link rel="stylesheet" href="/bots.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to workspace</a>
+  <header class="mobile-bar">
+    <button type="button" class="icon-button" id="drawer-open" aria-label="Open navigation and teammates" aria-controls="sidebar" aria-expanded="false"><span data-icon="menu"></span></button>
+    <a class="wordmark" href="#/home">linubot<span class="brand-dot" aria-hidden="true"></span></a>
+    <span class="eyebrow">Local team</span>
+  </header>
+  <div class="app-shell" id="app-shell">
+    <aside class="sidebar" id="sidebar" aria-label="Navigation and teammates">
+      <div class="brand-row">
+        <a class="brand" href="#/home" aria-label="linubot home">
+          <img class="brand-mark" src="/assets/icon.png" alt="" width="35" height="35">
+          <span><span class="wordmark">linubot</span><span class="brand-caption">A little help, every day</span></span>
+        </a>
+        <button type="button" class="icon-button drawer-close" id="drawer-close" aria-label="Close navigation"><span data-icon="close"></span></button>
+      </div>
+      <nav class="main-nav" aria-label="Main navigation">
+        <a href="#/home" data-nav="home"><span data-icon="group"></span><span>Your bots</span></a>
+        <a href="#/sessions" data-nav="sessions"><span data-icon="chat"></span><span>Sessions</span></a>
+      </nav>
+      <div class="roster-heading"><h2>Bots</h2><button type="button" class="icon-button" id="new-bot" aria-label="Add a bot"><span data-icon="plus"></span></button></div>
+      <label class="roster-search"><span class="sr-only">Find a bot or group</span><span data-icon="search"></span><input id="roster-search" type="search" placeholder="Find a bot" autocomplete="off"><kbd aria-hidden="true">Ctrl K</kbd></label>
+      <div class="roster-scroll">
+        <nav id="bot-roster" class="roster" aria-label="Teammates"><p class="sidebar-note">Loading your bots…</p></nav>
+        <div class="roster-heading group-heading"><h2>Groups</h2><button type="button" class="icon-button" id="new-group" aria-label="Create a group"><span data-icon="plus"></span></button></div>
+        <nav id="group-roster" class="roster" aria-label="Groups"></nav>
+      </div>
+      <footer class="sidebar-footer">
+        <button type="button" class="small" data-upgrade hidden>Upgrade Linubot</button>
+        <a class="settings-link advanced-link" href="#/advanced" data-nav="advanced" aria-label="Advanced" aria-describedby="learning-status"><span data-icon="settings"></span><span>Advanced</span><span class="learning-indicator" data-learning-indicator aria-hidden="true" hidden></span><span class="sr-only" id="learning-status" data-learning-summary></span></a>
+        <a class="settings-link" href="#/settings" data-nav="settings"><span data-icon="settings"></span><span>Settings</span></a>
+        <a class="provider-link" href="#/settings/provider" id="provider-status"><span class="status-dot" aria-hidden="true"></span><span>Checking configuration...</span></a>
+        <p class="connection-note" id="server-status" role="status"></p>
+      </footer>
+    </aside>
+    <main class="stage" id="main-content" tabindex="-1">
+      <div class="page loading-state"><span class="eyebrow">Your local team</span><h1>Hello there.</h1><p>Opening your bots.</p></div>
+    </main>
+  </div>
+  <button type="button" id="drawer-backdrop" class="drawer-backdrop" aria-label="Close navigation" hidden tabindex="-1"></button>
+  <dialog id="app-dialog" aria-labelledby="dialog-title">
+    <div class="dialog-header"><div><p class="eyebrow" id="dialog-eyebrow">linubot</p><h2 id="dialog-title"></h2></div><button type="button" class="icon-button" id="dialog-close" aria-label="Close dialog"><span data-icon="close"></span></button></div>
+    <div id="dialog-content" class="dialog-content"></div>
+  </dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <noscript><p class="noscript">linubot needs JavaScript for local conversations and task controls. Enable it, then reload this page.</p></noscript>
+</body>
+</html>

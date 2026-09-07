@@ -1,0 +1,49 @@
+Linubot
+Copyright 2026 Linubot contributors
+
+Linubot is licensed under the Apache License, Version 2.0.
+Third-party components retain their own copyright and license terms.
+This notice does not replace the license files supplied with those components.
+
+Application dependencies declared in package.json:
+
+  @modelcontextprotocol/sdk - MIT
+    https://github.com/modelcontextprotocol/typescript-sdk
+  ipaddr.js - MIT
+    https://github.com/whitequark/ipaddr.js
+  linkedom - ISC
+    https://github.com/WebReflection/linkedom
+  yaml - ISC
+    https://github.com/eemeli/yaml
+
+Desktop runtime and build/test tools:
+
+  Electron - MIT; includes Chromium, Node.js and other components with
+    their own notices in Electron's distribution.
+    https://github.com/electron/electron
+  TypeScript - Apache-2.0
+    https://github.com/microsoft/TypeScript
+  Playwright - Apache-2.0
+    https://github.com/microsoft/playwright
+  electron-builder - MIT
+    https://github.com/electron-userland/electron-builder
+
+Additional executables included by the Linux packaging script:
+
+  agent-workspace-linux - MIT
+    https://github.com/agent-sh/agent-workspace-linux
+    The package includes its license and version/hash provenance under
+    resources/workspace/.
+  uv and uvx - MIT OR Apache-2.0
+    https://github.com/astral-sh/uv
+    The package includes both license texts and version/hash provenance
+    under resources/runners/.
+
+package-lock.json records resolved JavaScript dependency versions, including
+transitive dependencies. Installed packages include their respective licenses.
+Distributors must retain Electron's and bundled dependencies' license files.
+
+The Codex CLI, Muse Code, Qwen Code, Hermes Agent and Grok Bot are external
+applications. Linubot interoperates with selected APIs or local formats; these
+applications are not bundled. Provider names identify integrations and do not
+imply endorsement. Generated Linubot brand assets are described in docs/BRAND.md.

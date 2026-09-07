@@ -1,0 +1,127 @@
+{
+  "name": "linubot",
+  "private": true,
+  "version": "2.6.0",
+  "description": "A self-hosted Linux team of AI coworkers with web access and owned computer workspaces",
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-strip-types src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.ts tests/*.test.mjs",
+    "test:watch": "node --experimental-strip-types --test --watch tests/*.test.ts tests/*.test.mjs",
+    "start": "npm run build && electron .",
+    "build": "tsc -p tsconfig.build.json",
+    "desktop": "npm run build && electron .",
+    "package:linux": "npm run build && node scripts/prepare-workspace.mjs && electron-builder --linux deb dir",
+    "test:desktop": "npm run build && playwright test",
+    "test:workspace": "npm run build && node scripts/workspace-smoke.mjs",
+    "install:local": "node scripts/install-local.mjs",
+    "release:artifacts": "node scripts/release-artifacts.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "^26.4.1",
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3",
+    "typescript": "^5.6.0"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.30.0",
+    "ipaddr.js": "2.5.0",
+    "linkedom": "0.18.13",
+    "yaml": "2.9.0"
+  },
+  "main": "desktop/main.cjs",
+  "author": {
+    "name": "agent-sh contributors",
+    "email": "55848801+avifenesh@users.noreply.github.com"
+  },
+  "build": {
+    "appId": "io.linubot.desktop",
+    "productName": "Linubot",
+    "artifactName": "linubot-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "desktop/**/*",
+      "web/**/*",
+      "package.json",
+      "LICENSE",
+      "NOTICE"
+    ],
+    "extraResources": [
+      {
+        "from": "build/workspace",
+        "to": "workspace"
+      },
+      {
+        "from": "build/runners",
+        "to": "runners"
+      },
+      {
+        "from": "desktop/linubot-chrome.sh",
+        "to": "linubot-chrome.sh"
+      },
+      {
+        "from": "install.sh",
+        "to": "install.sh"
+      }
+    ],
+    "linux": {
+      "target": [
+        "deb",
+        "dir"
+      ],
+      "category": "Utility",
+      "icon": "desktop/icon.png",
+      "executableName": "linubot",
+      "desktop": {
+        "entry": {
+          "Name": "Linubot",
+          "Comment": "Your local AI team",
+          "StartupWMClass": "linubot"
+        }
+      },
+      "syncDesktopName": true
+    },
+    "deb": {
+      "depends": [
+        "libgtk-3-0",
+        "libnss3",
+        "libxss1",
+        "libxtst6",
+        "libatspi2.0-0",
+        "libdrm2",
+        "libgbm1",
+        "libasound2",
+        "xvfb",
+        "openbox",
+        "xdotool",
+        "xauth",
+        "x11-utils",
+        "ffmpeg",
+        "xclip",
+        "bubblewrap",
+        "libxkbcommon-x11-0",
+        "npm",
+        "chromium | chromium-browser | google-chrome-stable",
+        "libc6 (>= 2.43)"
+      ]
+    }
+  },
+  "homepage": "https://github.com/agent-sh/linubot",
+  "desktopName": "linubot.desktop",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/agent-sh/linubot.git"
+  },
+  "bugs": {
+    "url": "https://github.com/agent-sh/linubot/issues"
+  }
+}
