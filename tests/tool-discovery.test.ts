@@ -20,16 +20,26 @@ it('keeps core schemas loaded while bounding recent extension schemas',()=>{
  const discovery=createToolDiscovery([core,...tools],new Set([core.name]));
  assert.deepEqual(discovery.active(),[core]);
  assert.ok(!discovery.names().includes(core.name));
- assert.equal(discovery.search(core.name,1).tools[0].name,core.name);
+ const result=discovery.search(core.name,1);assert.deepEqual(result.tools,[]);
+ assert.match(result.message,/^No matching tools\./);
  assert.deepEqual(discovery.active(),[core]);
  for(let i=0;i<30;i++)assert.equal(discovery.search(`tool_${i}`,1).tools[0].name,`tool_${i}`);
  assert.equal(discovery.active().length,13);assert.equal(discovery.active().some(tool=>tool.name==='tool_0'),false);
  assert.equal(discovery.resolve('tool_0')?.name,'tool_0');assert.equal(discovery.active().length,13);
  assert.ok(discovery.active().includes(core));
  const active=discovery.active();assert.equal(discovery.resolve(core.name),core);
- assert.equal(discovery.search(core.name,1).tools[0].name,core.name);assert.deepEqual(discovery.active(),active);
+ assert.deepEqual(discovery.search(core.name,1).tools,[]);assert.deepEqual(discovery.active(),active);
  assert.equal(discovery.resolve('not_registered'),undefined);
  assert.throws(()=>discovery.search('all',60),/limit/);
+});
+it('searches only MCP tools even when core tools rank higher for the query',()=>{
+ const core=Array.from({length:5},(_,i)=>({name:`workspace_${i}`,description:'Inspect workspace',parameters:{type:'object',properties:{}}}));
+ const remote={name:'remote_files',description:'Inspect workspace files with workspace_0',parameters:{type:'object',properties:{}}};
+ const discovery=createToolDiscovery([...core,remote],core.map(tool=>tool.name));
+ assert.deepEqual(discovery.active(),core);
+ assert.deepEqual(discovery.search('workspace').tools,[{name:remote.name,description:remote.description}]);
+ assert.deepEqual(discovery.active(),[...core,remote]);
+ assert.deepEqual(discovery.search('workspace_0',1).tools,[{name:remote.name,description:remote.description}]);
 });
 it('excludes core tools from the MCP catalog and remaining count',()=>{
  const tools=Array.from({length:131},(_,i)=>({name:`tool_${i}`,description:`Operation ${i}`,parameters:{type:'object',properties:{}}}));

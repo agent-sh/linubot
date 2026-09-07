@@ -32,7 +32,7 @@ export function createToolDiscovery(tools: ToolDefinition[], core: Iterable<stri
     search(query: string, limit = 5) {
       if (typeof query !== "string" || !query.trim() || query.length > 200 || !Number.isInteger(limit) || limit < 1 || limit > 5) throw new InputError("Search tools with a query and a limit from 1 to 5");
       const phrase = query.toLowerCase().trim(), terms = phrase.split(/[^\p{L}\p{N}]+/u).filter(Boolean);
-      const matches = tools.map(tool => {
+      const matches = tools.filter(tool => !coreNames.has(tool.name)).map(tool => {
         const name = tool.name.toLowerCase(), description = tool.description.toLowerCase();
         const metadata = tool as ToolDefinition & { originalName?: string; server?: string };
         const identifiers = [name, metadata.originalName?.toLowerCase(), metadata.server?.toLowerCase()].filter((value): value is string => Boolean(value));
