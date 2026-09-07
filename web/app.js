@@ -86,7 +86,7 @@ const changed = () => { void refreshOverview(true).catch(() => {}); };
 
 const services = {
   navigate, changed, getOverview: () => overview,
-  createBot, createGroup, editBot, manageGroup,
+  createBot, createGroup, editBot, deleteBot, manageGroup,
   openRun: (id, onChange) => openRun(id, { ...services, onChange }),
   saveCase: (bot, run, onChange) => saveCase(bot, { ...services, onChange }, run),
 };
@@ -181,6 +181,18 @@ function createBot() {
   }, "Adding your bot…");
 }
 
+async function deleteBot(name) {
+  try {
+    const affected = await api(`/api/bots/${enc(name)}/deletion`);
+    const changes = [affected.groups.length ? `Removes this bot from ${affected.groups.length} group(s).` : "", affected.routines.length ? `Deletes ${affected.routines.length} affected routine(s).` : "", affected.emptyGroups.length ? "Empty groups are removed." : ""].filter(Boolean).join(" ");
+    confirmAction(`Delete ${name}?`, `Deletes this bot’s profile and instructions. ${changes} Past messages and shared team memory are kept.`, async (confirmation) => {
+      await api(`/api/bots/${enc(name)}`, { method: "DELETE", body: { detachReferences: true } });
+      changed();
+      if (confirmation.alive()) { confirmation.close(); navigate("home"); }
+    }, { label: "Delete bot", danger: true });
+  } catch (error) { toast(error.message); }
+}
+
 async function editBot(name) {
   const modal = dialog(`About ${name}`, '<p class="quiet-empty" role="status">Loading profile and approved skills...</p>', { eyebrow: "Teammate / Profile" });
   try {
@@ -214,7 +226,7 @@ async function editBot(name) {
       if (modal.alive()) feedback(soul, "Instructions saved. Evaluate proposed lessons again after a context change.", "success");
       changed();
     });
-    modal.root.querySelector("[data-delete]").onclick = () => confirmAction(`Delete ${name}?`, "This removes the teammate profile. This action cannot be undone here.", async (confirmation) => { await api(`/api/bots/${enc(name)}`, { method: "DELETE" }); changed(); if (confirmation.alive()) { confirmation.close(); navigate("home"); } }, { label: "Delete teammate", danger: true });
+    modal.root.querySelector("[data-delete]").onclick = () => deleteBot(name);
     profile.elements.topic.focus();
   } catch (error) { if (modal.alive()) feedback(modal.root, error.message); }
 }

@@ -1,7 +1,7 @@
 {
   "name": "linubot",
   "private": true,
-  "version": "2.6.1",
+  "version": "2.7.0",
   "description": "A self-hosted Linux team of AI coworkers with web access and owned computer workspaces",
   "type": "module",
   "scripts": {
@@ -16,7 +16,8 @@
     "test:desktop": "npm run build && playwright test",
     "test:workspace": "npm run build && node scripts/workspace-smoke.mjs",
     "install:local": "node scripts/install-local.mjs",
-    "release:artifacts": "node scripts/release-artifacts.mjs"
+    "release:artifacts": "node scripts/release-artifacts.mjs",
+    "test:computer": "npm run build && node scripts/computer-takeover-trial.mjs"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

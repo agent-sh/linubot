@@ -235,6 +235,15 @@ describe("owned computer workspaces", () => {
     assert.equal(seen.length, 3);
   });
 
+  it("normalizes the public CLI bare status while checking its workspace and session", async () => {
+    const c = fake([]); await c.start(startOptions);
+    const bare = (id: string, session = `session-${ID}`) => fake([], (args) => args[1] === "status" ? JSON.stringify({ id, ready: true, session_id: session }) : undefined);
+    const status = JSON.parse(await bare(ID).status(ID));
+    assert.equal(status.status.id, ID); assert.equal(status.status.ready, true);
+    await assert.rejects(bare(OTHER).status(ID), /owned workspace/);
+    await assert.rejects(bare(ID, "other-session").status(ID), /different session/);
+  });
+
   it("surfaces backend status and session mismatches instead of trusting them", async () => {
     const c = fake([]);
     await c.start(startOptions);

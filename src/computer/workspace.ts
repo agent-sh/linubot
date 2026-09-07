@@ -5,9 +5,10 @@ import { fileURLToPath } from "node:url";
 import { dataDir, readJson, writeJson } from "../store.ts";
 import { InputError, requiredText } from "../errors.ts";
 
-export type Runner = (args: string[]) => Promise<string>;
+interface CommandOptions { signal?: AbortSignal; timeoutMs?: number }
+export type Runner = (args: string[], options?: CommandOptions) => Promise<string>;
 
-function defaultRunner(args: string[]): Promise<string> {
+function defaultRunner(args: string[], options: CommandOptions = {}): Promise<string> {
   const bin = process.env.LINUBOT_WORKSPACE_BIN ?? "agent-workspace-linux";
   // The viewer is a long-lived GUI, not an RPC. It exits when cleanup removes its workspace.
   if (args[0] === "viewer") {
@@ -21,7 +22,7 @@ function defaultRunner(args: string[]): Promise<string> {
     });
   }
   return new Promise((resolve, reject) => {
-    execFile(bin, args, { timeout: 90_000, killSignal: "SIGKILL", maxBuffer: 2 * 1024 * 1024 }, (err, stdout, stderr) => {
+    execFile(bin, args, { signal: options.signal, timeout: options.timeoutMs ?? 90_000, killSignal: "SIGKILL", maxBuffer: 2 * 1024 * 1024 }, (err, stdout, stderr) => {
       if (err) reject(new Error(String(stderr || err.message).trim() || err.message));
       else resolve(stdout);
     });
@@ -30,6 +31,7 @@ function defaultRunner(args: string[]): Promise<string> {
 
 export interface StartOptions {
   purpose: string;
+  scope?: string;
   profile?: string;
   id?: string;
   width?: number;
@@ -42,6 +44,7 @@ export interface WorkspaceHandle {
   id: string;
   purpose: string;
   sessionId?: string;
+  scope?: string;
 }
 
 interface OwnedWorkspace extends WorkspaceHandle {
@@ -78,6 +81,9 @@ function integer(value: number, label: string, min: number, max: number): number
 }
 
 interface BackendResponse {
+  id?: string;
+  session_id?: string;
+  ready?: boolean;
   ok?: boolean;
   message?: string;
   status?: { id?: string; session_id?: string; ready?: boolean };
@@ -100,12 +106,12 @@ const starting = new Set<string>();
 
 /** Only handles created and persisted by this adapter can be used. No host inventory or raw runner escape hatch. */
 export function createComputer(run: Runner = defaultRunner) {
-  const scoped = async (args: string[], id: unknown): Promise<string> => {
+  const scoped = async (args: string[], id: unknown, options?: CommandOptions): Promise<string> => {
     const owned = requireOwned(id);
     const [command, ...rest] = args;
     // The CLI stops parsing scope options at the first positional argument.
     // Text/key payloads also need '--' so literal text cannot become a flag.
-    const output = await run(["workspace", command, "--id", owned.id, ...(["key", "type", "clipboard-set"].includes(command) ? ["--"] : []), ...rest]);
+    const output = await run(["workspace", command, "--id", owned.id, ...(["key", "type", "clipboard-set"].includes(command) ? ["--"] : []), ...rest], options);
     const parsed = response(output);
     if (parsed.status?.id !== undefined && parsed.status.id !== owned.id) throw new Error("workspace backend returned the wrong ID");
     if (owned.sessionId && parsed.status?.session_id && parsed.status.session_id !== owned.sessionId) {
@@ -113,12 +119,18 @@ export function createComputer(run: Runner = defaultRunner) {
     }
     return output;
   };
-  const status = async (id: string): Promise<string> => {
-    const output = await scoped(["status"], id);
-    if (response(output).status?.id !== id) throw new Error("workspace status did not identify the owned workspace");
-    return output;
+  const status = async (id: string, options?: CommandOptions): Promise<string> => {
+    const output = await scoped(["status"], id, options);
+    const parsed = response(output);
+    // The public CLI returns a bare status object; MCP responses wrap it in `status`.
+    const current = parsed.status ?? (typeof parsed.ready === "boolean" ? parsed : undefined);
+    if (current?.id !== id) throw new Error("workspace status did not identify the owned workspace");
+    const owned = requireOwned(id);
+    if (owned.sessionId && current.session_id !== owned.sessionId) throw new Error("workspace backend returned a different session");
+    return parsed.status ? output : JSON.stringify({ ok: true, status: current });
   };
   return {
+    owned: () => ownedWorkspaces(),
     owns: (id: string): boolean => validId(id) && ownedWorkspaces().some((entry) => entry.id === id),
     doctor: (): Promise<string> => run(["doctor"]),
     async list(): Promise<string> {
@@ -133,6 +145,7 @@ export function createComputer(run: Runner = defaultRunner) {
     },
     async start(opts: StartOptions): Promise<WorkspaceHandle & { dryRun: boolean; preview?: Record<string, unknown> }> {
       const purpose = requiredText(opts?.purpose, "workspace purpose", 2000);
+      if (opts.scope !== undefined && !/^(bot|group):[a-zA-Z0-9_-]{1,60}$/.test(opts.scope)) throw new InputError("Invalid workspace conversation");
       if (opts.acknowledge !== true) throw new InputError("workspace start requires explicit acknowledgement", 403);
       if (opts.profile !== undefined) throw new InputError("host workspace profiles cannot be adopted by linubot");
       if (opts.dryRun !== undefined && typeof opts.dryRun !== "boolean") throw new InputError("dryRun must be a boolean");
@@ -158,7 +171,7 @@ export function createComputer(run: Runner = defaultRunner) {
           throw new Error("workspace start returned the wrong ID or an unready workspace");
         }
         if (typeof parsed.message === "string" && /already running/i.test(parsed.message)) throw new Error("cannot adopt an already-running workspace");
-        const handle: WorkspaceHandle = { id, purpose };
+        const handle: WorkspaceHandle = { id, purpose, ...(opts.scope ? { scope: opts.scope } : {}) };
         if (typeof parsed.status.session_id === "string" && parsed.status.session_id) handle.sessionId = parsed.status.session_id;
         writeJson(ownedPath(), [...ownedWorkspaces(), { ...handle, state: "running" }]);
         return { ...handle, dryRun: false };
@@ -213,29 +226,37 @@ export function createComputer(run: Runner = defaultRunner) {
       if (opts.allWindows) a.push("--all-windows");
       return scoped(a, opts.id);
     },
-    screenshot: async (output: string, id: string): Promise<string> => scoped(["screenshot", "--output", requiredText(output, "screenshot output", 4096)], id),
+    screenshot: async (output: string, id: string, options?: CommandOptions): Promise<string> => scoped(["screenshot", "--output", requiredText(output, "screenshot output", 4096)], id, options),
     windows: (id: string): Promise<string> => scoped(["windows"], id),
     activeWindow: (id: string): Promise<string> => scoped(["active-window"], id),
     focusWindow: async (title: string, id: string): Promise<string> => scoped(["focus-window", "--title", requiredText(title, "window title", 2000)], id),
-    click: async (x: number, y: number, id: string): Promise<string> => scoped(["click", String(integer(x, "x", 0, 65535)), String(integer(y, "y", 0, 65535))], id),
-    type: async (text: string, id: string): Promise<string> => {
+    click: async (x: number, y: number, id: string, options: CommandOptions & { button?: number } = {}): Promise<string> => scoped(["click", ...(options.button === undefined ? [] : ["--button", String(integer(options.button, "button", 1, 3))]), String(integer(x, "x", 0, 65535)), String(integer(y, "y", 0, 65535))], id, options),
+    drag: async (fromX: number, fromY: number, toX: number, toY: number, id: string, options?: CommandOptions): Promise<string> => scoped(["drag", ...[fromX, fromY, toX, toY].map((value) => String(integer(value, "coordinate", 0, 65535)))], id, options),
+    type: async (text: string, id: string, options?: CommandOptions): Promise<string> => {
       if (typeof text !== "string" || text.length > 65536 || text.includes("\0")) throw new InputError("input text must be a string of at most 65536 characters without NUL");
       if (text.startsWith("-")) {
         // This backend's xdotool type path treats a leading dash as an option.
         // The owned clipboard transports literal text without that second parser.
-        await scoped(["clipboard-set", text], id);
-        return scoped(["key", "ctrl+v"], id);
+        await scoped(["clipboard-set", text], id, options);
+        return scoped(["key", "ctrl+v"], id, options);
       }
-      return scoped(["type", text], id);
+      return scoped(["type", text], id, options);
     },
-    key: async (keys: string, id: string): Promise<string> => {
+    paste: async (text: string, id: string, options?: CommandOptions): Promise<string> => {
+      if (typeof text !== "string" || text.length > 16000 || text.includes("\0")) throw new InputError("Invalid pasted text");
+      await scoped(["clipboard-set", text], id, options);
+      return scoped(["key", "ctrl+v"], id, options);
+    },
+    // The public backend rejects zero-length clipboard values; a blank removes the transferred secret.
+    clearClipboard: async (id: string, options?: CommandOptions): Promise<string> => scoped(["clipboard-set", " "], id, options),
+    key: async (keys: string, id: string, options?: CommandOptions): Promise<string> => {
       const value = requiredText(keys, "keys", 2000);
       if (value.startsWith("-")) throw new InputError("Use a key name or combination, not command flags");
-      return scoped(["key", value], id);
+      return scoped(["key", value], id, options);
     },
-    scroll: async (x: number, y: number, direction: "up" | "down" | "left" | "right", id: string, amount = 3): Promise<string> => {
+    scroll: async (x: number, y: number, direction: "up" | "down" | "left" | "right", id: string, amount = 3, options?: CommandOptions): Promise<string> => {
       if (!["up", "down", "left", "right"].includes(direction)) throw new InputError("invalid scroll direction");
-      return scoped(["scroll", "--amount", String(integer(amount, "scroll amount", 1, 255)), String(integer(x, "x", 0, 65535)), String(integer(y, "y", 0, 65535)), direction], id);
+      return scoped(["scroll", "--amount", String(integer(amount, "scroll amount", 1, 255)), String(integer(x, "x", 0, 65535)), String(integer(y, "y", 0, 65535)), direction], id, options);
     },
     async openViewer(id: string, opts: { inputForwarding?: boolean } = {}): Promise<string> {
       requireOwned(id);

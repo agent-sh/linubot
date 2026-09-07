@@ -4,6 +4,16 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+## Release acceptance: 2.7.0
+
+Checked on 2026-09-07: 293 source tests and four packaged desktop scenarios
+passed. A real Chromium sign-in through the embedded panel passed with both a
+fixture model and ChatGPT. The bot waited for the owner, continued the same task,
+and cleaned up its workspace; the password was absent from conversation logs.
+Control-race tests cover deadlines, stale frames/actions, clipboard clearing,
+shutdown and ownership recovery. Deletion checks cover group work and routine
+deliveries as well as preservation of unrelated data.
+
 ## Release acceptance: 2.6.1
 
 Checked on 2026-09-07:
@@ -45,7 +55,9 @@ xvfb-run --auto-servernum npm run test:desktop
 
 Use an isolated Linux display. The desktop tests cover bot creation, mascots,
 conversations, artifacts, approvals, sessions, connection selection, imports,
-settings and restart behavior. They do not need your normal Linubot profile.
+settings and restart behavior. Embedded computer checks exercise the panel,
+control transfer and direct bot deletion using synthetic data. Tests do not
+need your normal Linubot profile.
 
 After [packaging](INSTALLATION.md#build-a-debian-package), run the same desktop
 suite against the executable that will be distributed:
@@ -77,7 +89,15 @@ not cover that backend.
 | Imports, source preservation and inactive historical data | `tests/imports.test.ts`, `tests/desktop/imports.test.mjs` |
 | MCP and remote skill installation | `tests/mcp.test.ts`, `tests/market.test.ts`, `tests/capabilities.test.ts` |
 | Public network reads and workspace scope | `tests/network.test.ts`, `tests/computer.test.ts` |
+| Embedded frames, owner control and fresh-screen actions | `tests/computer-view.test.ts`, `tests/desktop/computer.test.mjs` |
+| Bot deletion, reference cleanup and active delivery | `tests/bot-deletion.test.ts` |
 | Native interface and profile persistence | `tests/desktop/` |
+
+Embedded computer coverage includes serialized input, stale control sessions,
+revision checks after takeover, temporary frame cleanup, authenticated routes
+and keeping manual control through model failures. Deletion checks cover group
+detachment, affected routines, empty groups and refusal during active work or
+delivery. These additions do not change the historical 2.6.1 acceptance record.
 
 ## Live acceptance testing
 
@@ -99,6 +119,12 @@ A useful acceptance sequence is:
    between tasks, and recover an exact original detail through `read_session`.
 6. Inject a compaction-service failure and verify the same task continues its
    remaining work without duplicating completed actions.
+7. In the embedded Computer panel, take control, enter synthetic text, drag,
+   scroll and return control. Verify a fresh observation before bot actions
+   resume, stale-frame input refusal and cleanup when the task ends.
+8. Delete a fixture bot through Bot options. Verify the previewed group/routine
+   cleanup, retained prior messages/shared memory and refusal while affected
+   work or routine delivery is active.
 
 Before the initial public release, local xAI OAuth trials exercised web/MCP
 tools, workspace actions, group replies, memory updates, repeated compaction,

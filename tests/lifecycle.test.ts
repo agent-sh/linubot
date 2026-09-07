@@ -61,6 +61,7 @@ it("workspace input goes only to the owned ID and images follow all tool results
   const effects: string[] = [];
   const image = readFileSync("desktop/icon.png");
   const computer = {
+    owns: (id: string) => id === owned,
     start: async () => ({ id: owned }), openBrowser: async (id: string) => { assert.equal(id, owned); },
     browserNavigate: async (_url: string, id: string) => { assert.equal(id, owned); },
     browserSnapshot: async (id: string) => { assert.equal(id, owned); return '{"text":"A form"}'; },

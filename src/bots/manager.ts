@@ -231,23 +231,32 @@ export function updateBot(name: string, patch: BotOptions & { skills?: string[];
   return profile;
 }
 
-export function deleteBot(name: string): boolean {
+function deletionReferences(name: string) {
+  const groups = readJson<Array<{ id: string; name?: string; members: string[] }>>(storedFile(join(dataDir(), "groups.json")), []);
+  const jobs = readJson<Array<{ name: string; bot: string; deliver?: string }>>(storedFile(join(dataDir(), "jobs.json")), []);
+  if (!Array.isArray(groups) || !groups.every((group) => group && typeof group.id === "string" && Array.isArray(group.members) && group.members.every(validName))) throw new Error("cannot delete bot: invalid stored groups");
+  if (!Array.isArray(jobs) || !jobs.every((job) => job && typeof job.name === "string" && validName(job.bot) && (job.deliver === undefined || typeof job.deliver === "string"))) throw new Error("cannot delete bot: invalid stored jobs");
+  const emptyGroups = groups.filter((group) => group.members.includes(name) && group.members.every((member) => member === name)).map((group) => group.id);
+  const affected = (job: typeof jobs[number]) => job.bot === name || job.deliver?.trim() === `bot:${name}` || emptyGroups.some((id) => job.deliver?.trim() === `group:${id}`);
+  return { groups, jobs, emptyGroups, affected };
+}
+export function botDeletionPreview(name: string) {
+  if (!getBot(name)) throw new InputError("Bot not found", 404);
+  const { groups, jobs, emptyGroups, affected } = deletionReferences(name);
+  return { groups: groups.filter((group) => group.members.includes(name)).map((group) => ({ id: group.id, name: group.name || group.id })), routines: jobs.filter(affected).map((job) => ({ name: job.name })), emptyGroups };
+}
+export function deleteBot(name: string, options: { detachReferences?: boolean } = {}): boolean {
   const dir = botDir(name);
   if (!getBot(name)) return false;
-  // Read only reference fields here to avoid cycles through chat and scheduling modules.
-  const groups = readJson<unknown>(storedFile(join(dataDir(), "groups.json")), []);
-  const jobs = readJson<unknown>(storedFile(join(dataDir(), "jobs.json")), []);
-  if (!Array.isArray(groups) || !groups.every((group) => group && typeof group === "object" && Array.isArray(group.members) && group.members.every(validName))) {
-    throw new Error("cannot delete bot: invalid stored groups");
-  }
-  if (!Array.isArray(jobs) || !jobs.every((job) => job && typeof job === "object" && validName(job.bot) && (job.deliver === undefined || typeof job.deliver === "string"))) {
-    throw new Error("cannot delete bot: invalid stored jobs");
-  }
-  if (groups.some((group) => group.members.includes(name)) || jobs.some((job) => job.bot === name || job.deliver?.trim() === `bot:${name}`)) {
-    throw new InputError(`bot is referenced by a group or job: ${name}`, 409);
-  }
+  const { groups, jobs, affected } = deletionReferences(name);
+  const references = groups.some((group) => group.members.includes(name)) || jobs.some(affected);
+  if (references && !options.detachReferences) throw new InputError(`bot is referenced by a group or job: ${name}`, 409);
   const sections = listSections();
   const updated = sections.map((section) => ({ ...section, bots: section.bots.filter((bot) => bot !== name) }));
+  if (references) {
+    writeJson(join(dataDir(), "groups.json"), groups.map((group) => ({ ...group, members: group.members.filter((member) => member !== name) })).filter((group) => group.members.length));
+    writeJson(join(dataDir(), "jobs.json"), jobs.filter((job) => !affected(job)));
+  }
   if (sections.some((section, i) => section.bots.length !== updated[i].bots.length)) writeJson(join(dataDir(), "sections.json"), updated);
   rmSync(dir, { recursive: true });
   return true;
