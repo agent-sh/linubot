@@ -80,6 +80,10 @@ available source mechanisms. Hermes also provides
 Cloud exports need to be downloaded by the owner; they are not auto-fetched using
 undocumented endpoints. Adding a folder does not modify its source files.
 
+For an existing imported conversation, use [Sync latest from source](SYNC.md)
+to pull newer sessions and knowledge on demand. Re-importing still reuses an
+existing bot; synchronization is a separate, explicit operation.
+
 ## Locations and limits
 
 Hermes is discovered under HERMES_HOME or ~/.hermes, including named profiles

@@ -44,7 +44,8 @@ public class MainActivity extends Activity {
         if (browser != null) { browser.destroy(); browser = null; }
         layout(); LinearLayout form = new LinearLayout(this); form.setOrientation(LinearLayout.VERTICAL); form.setPadding(dp(24),dp(40),dp(24),dp(24)); root.addView(form);
         TextView title = new TextView(this); title.setText("Your bots, with you."); title.setTextSize(30); form.addView(title);
-        TextView help = new TextView(this); help.setText("On Linux, open Linubot Settings → Phone access. Enable access, then copy the HTTPS computer address here. Keep Tailscale connected on both devices."); help.setPadding(0,dp(18),0,dp(18)); form.addView(help);
+        TextView help = new TextView(this); help.setText("On Linux, open Linubot Settings → Phone access. Enable access, then scan its pairing QR code or enter the computer address. Keep Tailscale connected on both devices."); help.setPadding(0,dp(18),0,dp(18)); form.addView(help);
+        Button scan = new Button(this); scan.setText("Scan QR code"); form.addView(scan); scan.setOnClickListener(v -> scanQr());
         EditText address = new EditText(this); address.setSingleLine(true); address.setHint("https://computer.tailnet.ts.net:45874"); address.setInputType(android.text.InputType.TYPE_CLASS_TEXT | android.text.InputType.TYPE_TEXT_VARIATION_URI); address.setText(origin); form.addView(address);
         Button connect = new Button(this); connect.setText("Connect to my computer"); form.addView(connect);
         TextView error = new TextView(this); form.addView(error);
@@ -61,18 +62,27 @@ public class MainActivity extends Activity {
         Uri base = Uri.parse(origin);
         return "https".equals(uri.getScheme()) && base.getHost().equalsIgnoreCase(uri.getHost() == null ? "" : uri.getHost()) && (base.getPort() == -1 ? 443 : base.getPort()) == (uri.getPort() == -1 ? 443 : uri.getPort()) && uri.getUserInfo() == null;
     }
-    private void connect(String address) {
+    private void connect(String address) { connect(address,address+"/"); }
+    private void connect(String address,String destination) {
+        if (browser != null) { browser.stopLoading(); browser.destroy(); browser = null; }
         layout();
         LinearLayout bar = new LinearLayout(this); bar.setGravity(android.view.Gravity.CENTER_VERTICAL); bar.setPadding(dp(8),0,dp(8),0); root.addView(bar);
         connectionStatus = new TextView(this); connectionStatus.setText("Linubot"); bar.addView(connectionStatus,new LinearLayout.LayoutParams(0,dp(48),1));
         Button menu = new Button(this); menu.setText("Connection"); bar.addView(menu);
-        menu.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle("Your Linux computer").setMessage(origin).setPositiveButton("Refresh", (dialog,which) -> browser.reload()).setNeutralButton("Change computer", (dialog,which) -> {
-            CookieManager.getInstance().removeAllCookies(removed -> { CookieManager.getInstance().flush(); getPreferences(MODE_PRIVATE).edit().remove("origin").apply(); showSetup(); });
+        menu.setOnClickListener(v -> new AlertDialog.Builder(this).setTitle(origin).setItems(new String[]{"Refresh", "Scan QR code", "Change computer"}, (dialog,which) -> {
+            if (which==0) browser.reload();
+            else if (which==1) scanQr();
+            else CookieManager.getInstance().removeAllCookies(removed -> { CookieManager.getInstance().flush(); getPreferences(MODE_PRIVATE).edit().remove("origin").apply(); showSetup(); });
         }).setNegativeButton("Close", null).show());
         browser = new WebView(this); root.addView(browser,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1));
-        WebSettings settings = browser.getSettings(); settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true); settings.setAllowFileAccess(false); settings.setAllowContentAccess(false); settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW); settings.setSafeBrowsingEnabled(true); settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        WebSettings settings = browser.getSettings(); settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true); settings.setAllowFileAccess(false); settings.setAllowContentAccess(false); settings.setAllowFileAccessFromFileURLs(false); settings.setAllowUniversalAccessFromFileURLs(false); settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW); settings.setSafeBrowsingEnabled(true); settings.setJavaScriptCanOpenWindowsAutomatically(false);
         CookieManager.getInstance().setAcceptCookie(true); CookieManager.getInstance().setAcceptThirdPartyCookies(browser,false);
         browser.setWebViewClient(new WebViewClient() {
+            @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String scheme=request.getUrl().getScheme();
+                if (("http".equals(scheme) || "https".equals(scheme)) && !sameOrigin(request.getUrl())) return new android.webkit.WebResourceResponse("text/plain", "UTF-8", 403, "Different computer blocked", java.util.Collections.emptyMap(), new java.io.ByteArrayInputStream(new byte[0]));
+                return null;
+            }
             @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon) { loadFailed=false; connectionStatus.setText("Connecting…"); }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (sameOrigin(request.getUrl())) return false;
@@ -84,7 +94,22 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view,String url) { CookieManager.getInstance().flush(); if (!loadFailed && sameOrigin(Uri.parse(url))) connectionStatus.setText("Linubot"); }
         });
         browser.setDownloadListener((url,userAgent,contentDisposition,mimeType,length) -> download(url,length));
-        browser.loadUrl(address + "/");
+        if (!sameOrigin(Uri.parse(destination))) throw new IllegalArgumentException("Only the selected HTTPS computer can be loaded");
+        browser.loadUrl(destination);
+    }
+    private void scanQr() {
+        new com.google.zxing.integration.android.IntentIntegrator(this).setDesiredBarcodeFormats(com.google.zxing.integration.android.IntentIntegrator.QR_CODE).setPrompt("Scan the QR in Linubot Settings → Phone access").setBeepEnabled(false).setOrientationLocked(false).initiateScan();
+    }
+    @Override protected void onActivityResult(int requestCode,int resultCode,Intent data) {
+        com.google.zxing.integration.android.IntentResult result=com.google.zxing.integration.android.IntentIntegrator.parseActivityResult(requestCode,resultCode,data);
+        if (result==null) { super.onActivityResult(requestCode,resultCode,data); return; }
+        if (result.getContents()==null) return;
+        try {
+            PairingLink link=PairingLink.parse(result.getContents());
+            new AlertDialog.Builder(this).setTitle("Pair with this computer?").setMessage(link.origin).setPositiveButton("Connect",(dialog,which)->{
+                origin=link.origin;getPreferences(MODE_PRIVATE).edit().putString("origin",origin).apply();connect(origin,link.url);
+            }).setNegativeButton("Cancel",null).show();
+        } catch (IllegalArgumentException error) { new AlertDialog.Builder(this).setTitle("Not a Linubot pairing QR").setMessage(error.getMessage()).setPositiveButton("OK",null).show(); }
     }
     private void download(String url,long advertisedLength) {
         if (downloading || !sameOrigin(Uri.parse(url))) { connectionStatus.setText("Only this computer’s files can be downloaded"); return; }

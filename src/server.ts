@@ -1,3 +1,4 @@
+import { createImportSync } from "./imports/sync.ts";
 import { permissionSettings, botPermission } from "./agents/permissions.ts";
 import { createPhoneAccess } from "./phone/access.ts";
 import { phoneNetwork } from "./phone/tailscale.ts";
@@ -113,6 +114,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     options.onProviderConnected?.(saved); return saved;
   });
   const imports = createAgentImports(options.importRoots || { hermes: process.env.LINUBOT_IMPORT_HERMES, grok: process.env.LINUBOT_IMPORT_GROK });
+  const importSync = createImportSync(options.importRoots || { hermes: process.env.LINUBOT_IMPORT_HERMES, grok: process.env.LINUBOT_IMPORT_GROK }, (bots, scopes) => bots.some(bot => runtime.hasBotWork(bot)) || scopes.some(scope => runtime.state(scope) !== "idle") || computer.owned().some(workspace => workspace.state === "running" && scopes.includes(workspace.scope ?? "")));
   const webRoot = options.webRoot ?? WEB;
   const phone = createPhoneAccess({ webRoot, port: options.phonePort, target: () => { const address = server.address(); if (!address || typeof address === "string" || !options.accessToken) throw new InputError("Desktop server is not ready", 503); return { port: address.port, token: options.accessToken }; } });
   const streams = new Set<ServerResponse>();
@@ -261,6 +263,8 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         return;
       }
       if (r[0] === "imports") {
+        if (r[1] === "sync" && r[2] === "preview" && method === "POST") { ok(importSync.preview(requiredText(b.scope, "Conversation", 80))); return; }
+        if (r[1] === "sync" && r[2] === "commit" && method === "POST") { ok(importSync.commit(requiredText(b.id, "Sync preview", 80), optionalBoolean(b.replaceConflicts) ?? false)); return; }
         if (r[1] === "folder" && method === "POST") {
           const source = requiredText(b.source, "Source", 20);
           if (b.path !== undefined || req.headers["x-linubot-client"] === "phone" || !options.chooseImportFolder) throw new InputError("Choose the folder in the Linux app", 409);
@@ -282,7 +286,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         }
         const bot = requireBot(r[1]);
         const scope = `bot:${bot.name}`;
-        if (r.length === 2 && method === "GET") { ok({ ...bot, permissionMode: botPermission(bot.name).mode, provider: botProvider(bot), soul: readSoul(bot.name), importedContext: readBotContext(bot.name), unread: unreadCount(scope), state: runtime.state(scope), feed: tailEvents(scope) }); return; }
+        if (r.length === 2 && method === "GET") { ok({ ...bot, canSync: importSync.available(scope), permissionMode: botPermission(bot.name).mode, provider: botProvider(bot), soul: readSoul(bot.name), importedContext: readBotContext(bot.name), unread: unreadCount(scope), state: runtime.state(scope), feed: tailEvents(scope) }); return; }
         if (r.length === 2 && method === "PATCH") {
           if (b.providerId) getProvider(requiredText(b.providerId, "Provider connection", 80));
           ok(updateBot(bot.name, {
@@ -326,7 +330,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         const group = getGroup(r[1]);
         if (!group) throw new InputError("Group not found", 404);
         const scope = `group:${group.id}`;
-        if (r.length === 2 && method === "GET") { ok({ ...group, name: group.name || group.id, unread: unreadCount(scope), state: runtime.state(scope), feed: tailEvents(scope) }); return; }
+        if (r.length === 2 && method === "GET") { ok({ ...group, canSync: importSync.available(scope), name: group.name || group.id, unread: unreadCount(scope), state: runtime.state(scope), feed: tailEvents(scope) }); return; }
         if (r.length === 2 && method === "DELETE") {
           if (runtime.state(scope) !== "idle") throw new InputError("Stop this group's active tasks before deleting it", 409);
           ok({ deleted: deleteGroup(group.id) }); return;

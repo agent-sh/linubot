@@ -1,3 +1,4 @@
+import { captureBaseline, messageKey, importedSkillName as skillName } from "./state.ts";
 import { existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -8,7 +9,7 @@ import { createBot, getBot, listBots, validName, writeSoul, writeBotContext, upd
 import { getProvider } from "../auth/store.ts";
 import { saveLearnedSkill, validateLearnedSkill, approveSkill } from "../marketplace/search.ts";
 import { addJob } from "../crons/scheduler.ts";
-import { appendEvent } from "../events/log.ts";
+import { appendImportedEvents, bus, invalidateFeed, type FeedEvent } from "../events/log.ts";
 import { listGroups } from "../chat/session.ts";
 import { InputError } from "../errors.ts";
 
@@ -18,7 +19,7 @@ interface Prepared { bundle: SourceBundle; options: ImportOptions; targets: { na
 const uuid = /^[0-9a-f-]{36}$/;
 function metadata(name: string) { return readJson<{ source?: string }>(join(dataDir(), "profiles", name, "import.json"), {}); }
 function ensureDirectory(path: string) { const stat = lstatSync(path, { throwIfNoEntry: false }); if (stat && (!stat.isDirectory() || stat.isSymbolicLink())) throw new InputError("Unsafe import destination"); mkdirSync(path, { recursive: true, mode: 0o700 }); }
-const skillName = (bot: string, name: string, key: string) => `${importName(`${bot}-${name}`).toLowerCase().replaceAll("_", "-").slice(0, 31)}-${sourceId(`${bot}:${key}:${name}`).slice(0, 8)}`;
+
 
 export function createAgentImports(roots: ImportRoots = {}) {
   const sources = createImportSources(roots), pending = new Map<string, Prepared>();
@@ -96,14 +97,17 @@ export function createAgentImports(roots: ImportRoots = {}) {
     const backups = new Map<string, Buffer | undefined>();
     for (const name of ["groups.json", "jobs.json"]) { const path = join(dataDir(), name), stat = lstatSync(path, { throwIfNoEntry: false }); if (stat && (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2 * 1024 * 1024)) throw new InputError("Unsafe import destination"); backups.set(path, stat ? readFileSync(path) : undefined); }
     let messages = 0;
-    function importMessages(scope: string, values: ImportedMessage[], fallback: string) {
+    let result: ImportResult;
+    const emitted: { scope: string; events: FeedEvent[] }[] = [];
+    function importMessages(scope: string, values: ImportedMessage[], fallback: string, source: string) {
       const feed = join(dataDir(), `feed-${scope.replace(":", "_")}.jsonl`);
       if (existsSync(feed)) throw new InputError("An imported conversation already exists", 409);
       feeds.push(feed);
-      appendEvent(scope, { kind: "notice", text: "Imported conversation history. Past tasks and approvals are historical records; no actions were restarted." });
-      for (const message of values) {
-        appendEvent(scope, { kind: "message", from: message.role === "user" ? "user" : sourceNames.get(message.author || "") || (message.author ? `Imported: ${message.authorName || "bot"}` : fallback), text: message.text, at: message.at, stage: "imported" }); messages++;
-      }
+      const events = appendImportedEvents(scope, [
+        { kind: "notice", text: "Imported conversation history. Past tasks and approvals are historical records; no actions were restarted." },
+        ...values.map(message => ({ kind: "message" as const, from: message.role === "user" ? "user" : sourceNames.get(message.author || "") || (message.author ? `Imported: ${message.authorName || "bot"}` : fallback), text: message.text, at: message.at, stage: "imported", importKey: messageKey(source, message) })),
+      ]);
+      messages += values.length; emitted.push({ scope, events });
     }
     try {
       for (const [index, source] of bundle.bots.entries()) {
@@ -111,7 +115,7 @@ export function createAgentImports(roots: ImportRoots = {}) {
         createBot(target.name, { providerId: entry.providerId, model: entry.model, goal: source.candidate.description.slice(0, 4000) }); created.push(target.name);
         if (source.soul.trim()) writeSoul(target.name, source.soul);
         if (options.memory !== false && source.context) writeBotContext(target.name, source.context);
-        importMessages(`bot:${target.name}`, source.messages, target.name);
+        importMessages(`bot:${target.name}`, source.messages, target.name, target.source);
         const attachedSkills: string[] = [];
         for (const skill of source.skills) {
           const name = skillName(target.name, skill.name, skill.key);
@@ -127,23 +131,27 @@ export function createAgentImports(roots: ImportRoots = {}) {
           const jobs = readJson<{ name: string }[]>(join(dataDir(), "jobs.json"), []); if (jobs.some((job) => job.name === name)) throw new InputError("An imported routine name is already in use", 409);
           addJob({ name, bot: target.name, prompt: routine.prompt, schedule: routine.schedule, enabled: false }); routines.push(name);
         }
-        writeJson(join(dataDir(), "profiles", target.name, "import.json"), { source: target.source, kind: source.candidate.source, originalName: source.candidate.name, sourceModel: source.model, sourceProvider: source.provider, importedAt: new Date().toISOString(), receipt: id, skills: source.skills.map((skill) => skillName(target.name, skill.name, skill.key)), warnings: source.warnings });
+        writeJson(join(dataDir(), "profiles", target.name, "import.json"), { source: target.source, kind: source.candidate.source, originalName: source.candidate.name, sourceModel: source.model, sourceProvider: source.provider, importedAt: new Date().toISOString(), receipt: id, skills: source.skills.map((skill) => skillName(target.name, skill.name, skill.key)), warnings: source.warnings, baseline: captureBaseline(target.name, source) });
       }
       for (const group of groups) if (!listGroups().some(value => value.id === group.id)) {
         if (existsSync(join(dataDir(), `feed-group_${group.id}.jsonl`))) throw new InputError("An imported group conversation already exists", 409);
         const members = group.sources.map(source => sourceNames.get(source)!);
         writeJson(join(dataDir(), "groups.json"), [...listGroups(), { id: group.id, name: group.name.slice(0, 80), members }]);
-        importMessages(`group:${group.id}`, group.messages, members[0]);
+        importMessages(`group:${group.id}`, group.messages, members[0], group.id.slice(5));
       }
-      const result: ImportResult = { id, scope: groups.length ? `group:${groups[0].id}` : `bot:${targets[0].name}`, bots: targets.map((target) => target.name), groups: groups.map(({ id, name }) => ({ id, name })), skills, routines, messages, warnings: bundle.warnings };
-      writeJson(join(directory(), `${id}.json`), result); pending.delete(id); return result;
+      result = { id, scope: groups.length ? `group:${groups[0].id}` : `bot:${targets[0].name}`, bots: targets.map((target) => target.name), groups: groups.map(({ id, name }) => ({ id, name })), skills, routines, messages, warnings: bundle.warnings };
+      writeJson(join(directory(), `${id}.json`), result);
     } catch (error) {
       for (const [path, value] of backups) { if (value) writeFileSync(path, value); else rmSync(path, { force: true }); }
       for (const path of feeds) rmSync(path, { force: true });
+      for (const batch of emitted) invalidateFeed(batch.scope);
       for (const name of skills) rmSync(join(dataDir(), "skills", name), { recursive: true, force: true });
       for (const name of created) rmSync(join(dataDir(), "profiles", name), { recursive: true, force: true });
       throw error;
     }
+    pending.delete(id);
+    for (const batch of emitted) for (const event of batch.events) bus.emit("event", batch.scope, event);
+    return result;
   }
   return { discover, preview, commit, addFolder: sources.addFolder };
 }

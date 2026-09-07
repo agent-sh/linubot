@@ -29,6 +29,7 @@ export interface FeedEvent {
   callId?: string;
   refSeq?: number;
   stage?: string;
+  importKey?: string;
   durationMs?: number;
 }
 
@@ -100,6 +101,15 @@ export function appendEvent(scope: string, e: NewEvent): FeedEvent {
   bus.emit("event", scope, full);
   return full;
 }
+
+/** Sync writes can defer live publication until their filesystem transaction succeeds. */
+export function appendImportedEvents(scope: string, events: NewEvent[]): FeedEvent[] {
+  const existing = readAll(scope), path = logPath(scope);
+  const values = events.map((event, index) => ({ ...event, seq: existing.length + index + 1, at: event.at ?? new Date().toISOString() }));
+  if (values.length) appendFileSync(path, values.map(event => JSON.stringify(event) + "\n").join(""), { mode: 0o600 });
+  cache.delete(path); return values;
+}
+export function invalidateFeed(scope: string): void { cache.delete(logPath(scope)); }
 
 /** Tail page: last `limit` events at or before `beforeSeq` (1-based, newest last). */
 export function tailEvents(scope: string, limit = 50, beforeSeq?: number): { entries: FeedEvent[]; nextBeforeSeq: number | null; lastSeq: number } {
