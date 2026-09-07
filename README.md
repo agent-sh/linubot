@@ -28,6 +28,9 @@ for wget, system packages and source builds.
 
 ![Linubot with three example helpers](docs/images/bots.png)
 
+Use the same bots from your phone with [private phone access and the Android app](docs/PHONE.md).
+Skills and connected tools are [discovered on demand](docs/DISCOVERY.md).
+
 ## When to use it
 
 - Use it when you want separate helpers for research, writing and everyday plans.

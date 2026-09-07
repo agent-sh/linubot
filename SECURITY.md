@@ -20,7 +20,11 @@ Linubot runs for one local Linux user. It is not a multi-user service or a
 security boundary between processes running as that user. The packaged desktop
 serves its interface over an authenticated, private loopback connection. The
 browser development server is for local development and must not be exposed as
-a public service.
+a public service. Optional phone access uses a separate loopback gateway behind
+a trusted HTTPS proxy, with explicit device pairing. A paired phone has owner
+access; it is not a restricted guest account. Pairing credentials are hashed at
+rest, codes expire, and revocation closes active phone connections. See
+[phone access](docs/PHONE.md) for the network and Android trust boundaries.
 
 The Electron renderer uses context isolation and sandboxing, with Node access
 disabled. Credentials remain in the backend. A separate Linux workspace owns
@@ -32,7 +36,10 @@ Task-scoped approval state is enforced by the runtime. Historical approvals,
 model text, website instructions and MCP annotations do not grant permission.
 An initial workspace grant covers normal interaction in that task's workspace;
 exact executable launches and external commitments have additional approval
-requirements. Every MCP invocation requires application approval.
+requirements in Ask first mode. An owner can explicitly enable Always approve
+globally or per bot to skip runtime approval prompts; automatic approvals are
+recorded. Ownership, cancellation and manual sign-in boundaries still apply.
+See [permission modes](docs/PERMISSIONS.md).
 
 ## Credentials and data
 
@@ -75,8 +82,9 @@ start as drafts and must be reviewed and attached before use. Installing a
 skill does not automatically execute its scripts. Executable extensions have
 their own dependencies and security implications.
 
-Hermes and Grok Bot imports create reviewed local records, with supported skills
-as drafts and routines paused. Credentials, old permissions and historical
+Hermes and Grok Bot imports create reviewed local records. The import preview
+can approve and attach selected skills; users can opt to keep them as drafts.
+Routines remain paused. Credentials, old permissions and historical
 requests do not become active grants. Imported instructions can still be wrong
 or malicious; review the preview and attached skills before using the bot.
 

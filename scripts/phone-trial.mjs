@@ -1,0 +1,24 @@
+import { createServer } from 'node:http';
+import { mkdtempSync,writeFileSync,rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+const directory=mkdtempSync(join(tmpdir(),'linubot-phone-trial-'));
+process.env.LINUBOT_DATA=directory;
+const {createApp}=await import('../dist/server.js');
+const {createBot}=await import('../dist/bots/manager.js');
+const {setProvider}=await import('../dist/auth/store.js');
+const provider=createServer(async(req,res)=>{res.setHeader('content-type','application/json');if(req.method==='GET'){res.end(JSON.stringify({data:[{id:'fixture'}]}));return;}let raw='';for await(const chunk of req)raw+=chunk;const body=JSON.parse(raw);
+ const latestUser=body.messages.filter(message=>message.role==='user').at(-1)?.content??'';
+ const tool=body.messages.findLast(message=>message.role==='tool' && message.tool_call_id==='phone-artifact');
+ const message=latestUser.includes('Create an artifact') ? tool ? {content:'File ready.'} : {content:'',tool_calls:[{id:'phone-artifact',type:'function',function:{name:'save_artifact',arguments:JSON.stringify({title:'Phone artifact',content:'# Phone artifact\nANDROID_ARTIFACT_OK'})}}]} : {content:'PHONE_CHAT_OK'};
+ res.end(JSON.stringify({choices:[{message}]}));});
+await new Promise(resolve=>provider.listen(0,'127.0.0.1',resolve));
+setProvider({kind:'openai-compat',baseUrl:`http://127.0.0.1:${provider.address().port}/v1`,model:'fixture',auth:'none'});createBot('PhoneFixture');
+const app=createApp({accessToken:'phone-fixture-desktop-token',scheduler:false,review:false});
+await new Promise(resolve=>app.server.listen(0,'127.0.0.1',resolve));
+const base=`http://127.0.0.1:${app.server.address().port}`;
+const post=async(path)=>{const response=await fetch(base+path,{method:'POST',headers:{'x-linubot-token':'phone-fixture-desktop-token','content-type':'application/json'},body:'{}'});const result=await response.json();if(!response.ok)throw Error(result.error);return result;};
+const status=await post('/api/phone/enable');const pair=await post('/api/phone/pair');
+writeFileSync('/tmp/linubot-phone-trial.json',JSON.stringify({directory,base,origin:status.origin,code:pair.code,pid:process.pid}),{mode:0o600});console.log('Private HTTPS phone fixture ready; connection details saved in /tmp/linubot-phone-trial.json');
+let closing=false;async function close(){if(closing)return;closing=true;await app.close();provider.closeAllConnections();await new Promise(resolve=>provider.close(resolve));rmSync(directory,{recursive:true,force:true});process.exit(0);}
+process.on('SIGTERM',close);process.on('SIGINT',close);

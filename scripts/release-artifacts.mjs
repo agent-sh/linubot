@@ -11,7 +11,7 @@ for (const path of ['resources/app.asar', 'resources/workspace/agent-workspace-l
 copyFileSync('desktop/icon.png', 'release/linux-unpacked/linubot.png');
 const archive = `linubot-${version}-x64.tar.gz`, deb = `linubot-${version}-amd64.deb`;
 execFileSync('tar', ['-czf', `release/${archive}`, '-C', 'release/linux-unpacked', '.'], { stdio: 'inherit' });
-const names = [archive, deb];
+const names = [archive, deb, `linubot-${version}-android.apk`];
 const lines = names.map((name) => `${createHash('sha256').update(readFileSync(`release/${name}`)).digest('hex')}  ${name}`);
 writeFileSync('release/SHA256SUMS', lines.join('\n') + '\n');
 console.log(`Prepared ${names.join(', ')} and SHA256SUMS.`);

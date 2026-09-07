@@ -1,3 +1,7 @@
+import { permissionSettings, botPermission } from "./agents/permissions.ts";
+import { createPhoneAccess } from "./phone/access.ts";
+import { phoneNetwork } from "./phone/tailscale.ts";
+import QRCode from "qrcode";
 import { createWorkspaceView } from "./computer/view.ts";
 import { createUpdates, type Updates } from "./updates.ts";
 import { xaiStatus, importHermesXai, beginXaiLogin, pollXaiLogin, disconnectXai, xaiModels } from "./auth/xai.ts";
@@ -88,7 +92,7 @@ function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { scheduler?: boolean; accessToken?: string; webRoot?: string; onProviderConnected?: (id: string) => void; openRouterRequest?: typeof fetch; importRoots?: ImportRoots; updates?: Updates } = {}) {
+export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { scheduler?: boolean; accessToken?: string; webRoot?: string; onProviderConnected?: (id: string) => void; openRouterRequest?: typeof fetch; importRoots?: ImportRoots; updates?: Updates; phonePort?: number; chooseImportFolder?: () => Promise<string | undefined> } = {}) {
   const updates = options.updates ?? createUpdates();
   ensureMemoryFiles();
   const computer = options.computer ?? createComputer();
@@ -110,6 +114,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   });
   const imports = createAgentImports(options.importRoots || { hermes: process.env.LINUBOT_IMPORT_HERMES, grok: process.env.LINUBOT_IMPORT_GROK });
   const webRoot = options.webRoot ?? WEB;
+  const phone = createPhoneAccess({ webRoot, port: options.phonePort, target: () => { const address = server.address(); if (!address || typeof address === "string" || !options.accessToken) throw new InputError("Desktop server is not ready", 503); return { port: address.port, token: options.accessToken }; } });
   const streams = new Set<ServerResponse>();
   const evaluations = new Set<AbortController>();
   let stopping = false, updating = false;
@@ -118,7 +123,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   const runningJobs = new Map<string, { bot: string; deliver?: string }>();
 
   function roster() {
-    return listBots().map((bot) => ({ ...bot, provider: botProvider(bot), preview: previewOf(`bot:${bot.name}`).slice(0, 140), unread: unreadCount(`bot:${bot.name}`), state: runtime.state(`bot:${bot.name}`) }));
+    return listBots().map((bot) => ({ ...bot, permissionMode: botPermission(bot.name).mode, provider: botProvider(bot), preview: previewOf(`bot:${bot.name}`).slice(0, 140), unread: unreadCount(`bot:${bot.name}`), state: runtime.state(`bot:${bot.name}`) }));
   }
   function botProvider(bot: NonNullable<ReturnType<typeof getBot>>) {
     const status = providerStatus(bot.providerId);
@@ -206,10 +211,28 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
       const b = method === "GET" ? {} : await body(req);
       if (updating && method !== "GET") throw new InputError("Linubot is restarting for an update", 503);
 
+      if (r[0] === "permissions") {
+        if (method === "PUT") runtime.setPermissionMode(requiredText(b.mode, "Permission mode", 20), optionalText(b.bot, "Bot", 40));
+        if (method === "GET" || method === "PUT") { ok({ ...permissionSettings(), bots: listBots().map(bot => ({ name: bot.name, ...botPermission(bot.name) })) }); return; }
+      }
+      if (r[0] === "phone") {
+        if (!options.accessToken || req.headers["x-linubot-client"] === "phone") throw new InputError("Phone access is managed by the Linux desktop app", 403);
+        if (r.length === 1 && method === "GET") { ok(phone.status()); return; }
+        if (r[1] === "enable" && method === "POST") {
+          if (b.origin) { ok(await phone.enable(requiredText(b.origin, "HTTPS address", 250))); return; }
+          const network = await phoneNetwork();
+          await phone.enable(network.origin);
+          try { await network.configure(); } catch (error) { await phone.disable(); throw error; }
+          ok(phone.status()); return;
+        }
+        if (r[1] === "disable" && method === "POST") { ok(await phone.disable()); return; }
+        if (r[1] === "pair" && method === "POST") { const pairing = phone.pair(); ok({ ...pairing, qr: await QRCode.toDataURL(pairing.url, { width: 256, margin: 2 }) }); return; }
+        if (r[1] === "devices" && r.length === 3 && method === "DELETE") { ok(phone.revoke(r[2])); return; }
+      }
       if (r[0] === "overview" && method === "GET") {
         ok({ provider: providerStatus(), bots: roster(), groups: groups(), summary: summarizeRuns(), runs: listRuns({ limit: 30 }),
           proposals: listProposals(), jobs: jobs(), schedulerError, memory: memoryUsage(),
-          capabilities: { tools: agentTools().map((tool) => tool.name), mcp: "connected-tools", connections: mcp.status(), search: readWebSearch().backend !== "disabled", web: true, desktop: Boolean(options.accessToken) } });
+          capabilities: { tools: agentTools().map((tool) => tool.name), mcp: "connected-tools", connections: mcp.status(), search: readWebSearch().backend !== "disabled", web: true, desktop: Boolean(options.accessToken), phone: req.headers["x-linubot-client"] === "phone" } });
         return;
       }
       if (r[0] === "stream" && method === "GET") {
@@ -238,8 +261,15 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         return;
       }
       if (r[0] === "imports") {
+        if (r[1] === "folder" && method === "POST") {
+          const source = requiredText(b.source, "Source", 20);
+          if (b.path !== undefined || req.headers["x-linubot-client"] === "phone" || !options.chooseImportFolder) throw new InputError("Choose the folder in the Linux app", 409);
+          const path = await options.chooseImportFolder();
+          if (!path) { ok({ cancelled: true }); return; }
+          ok(imports.addFolder(path, source)); return;
+        }
         if (r[1] === "sources" && method === "GET") { ok(imports.discover()); return; }
-        if (r[1] === "preview" && method === "POST") { ok(imports.preview({ sourceId: optionalText(b.sourceId, "Source", 80), sourceIds: b.sourceIds === undefined ? undefined : textList(b.sourceIds, "Sources", 100, 80), name: optionalText(b.name, "Name", 40), providerId: optionalText(b.providerId ?? undefined, "Provider", 80), model: optionalText(b.model, "Model", 200), memory: optionalBoolean(b.memory), skills: optionalBoolean(b.skills), history: optionalBoolean(b.history), routines: optionalBoolean(b.routines) })); return; }
+        if (r[1] === "preview" && method === "POST") { ok(imports.preview({ sourceId: optionalText(b.sourceId, "Source", 80), sourceIds: b.sourceIds === undefined ? undefined : textList(b.sourceIds, "Sources", 100, 80), name: optionalText(b.name, "Name", 40), providerId: optionalText(b.providerId ?? undefined, "Provider", 80), model: optionalText(b.model, "Model", 200), memory: optionalBoolean(b.memory), skills: optionalBoolean(b.skills), history: optionalBoolean(b.history), routines: optionalBoolean(b.routines), activateSkills: optionalBoolean(b.activateSkills) })); return; }
         if (r[1] === "commit" && method === "POST") { ok(imports.commit(requiredText(b.id, "Preview", 80))); return; }
       }
       if (r[0] === "bots") {
@@ -252,13 +282,13 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         }
         const bot = requireBot(r[1]);
         const scope = `bot:${bot.name}`;
-        if (r.length === 2 && method === "GET") { ok({ ...bot, provider: botProvider(bot), soul: readSoul(bot.name), importedContext: readBotContext(bot.name), unread: unreadCount(scope), state: runtime.state(scope), feed: tailEvents(scope) }); return; }
+        if (r.length === 2 && method === "GET") { ok({ ...bot, permissionMode: botPermission(bot.name).mode, provider: botProvider(bot), soul: readSoul(bot.name), importedContext: readBotContext(bot.name), unread: unreadCount(scope), state: runtime.state(scope), feed: tailEvents(scope) }); return; }
         if (r.length === 2 && method === "PATCH") {
           if (b.providerId) getProvider(requiredText(b.providerId, "Provider connection", 80));
           ok(updateBot(bot.name, {
             providerId: b.providerId === null ? null : optionalText(b.providerId, "Provider connection", 80),
             model: optionalText(b.model, "Model", 200) || undefined, topic: b.topic === null ? null : optionalText(b.topic, "Specialty", 2000), goal: optionalText(b.goal, "Goal", 4000), mascotSeed: optionalText(b.mascotSeed, "Mascot seed", 80),
-            pinned: optionalBoolean(b.pinned), skills: b.skills === undefined ? undefined : textList(b.skills, "Skills", 40, 40),
+            pinned: optionalBoolean(b.pinned), skills: b.skills === undefined ? undefined : textList(b.skills, "Skills", 256, 40),
           })); return;
         }
         if (r[2] === "deletion" && method === "GET") { ok(botDeletionPreview(bot.name)); return; }
@@ -585,6 +615,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     }, 15000);
     scheduler.unref();
   });
+  server.once("listening", () => { if (options.accessToken) void phone.start().catch(() => {}); });
   return { server, runtime, freezeForUpdate() {
     if (runtime.busy() || workspaceView.busy() || evaluations.size || jobsRunning) throw new InputError("Finish active tasks before upgrading Linubot", 409);
     updating = true; runtime.pauseAdmissions(true);
@@ -593,6 +624,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     stopping = true;
     clearInterval(scheduler);
     evaluations.forEach((controller) => controller.abort(new Error("Server is stopping")));
+    await phone.close();
     workspaceView.close();
     await runtime.close();
     await openRouter.close();

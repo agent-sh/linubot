@@ -46,6 +46,51 @@ beforeEach(() => {
 afterEach(() => { if (prior === undefined) delete process.env.LINUBOT_DATA; else process.env.LINUBOT_DATA = prior; rmSync(root, { recursive: true, force: true }); });
 
 describe("agent import conversion", () => {
+  it("imports exported Grok memory, instructions and skills into a usable native bot", () => {
+    const exported = join(root, "ExportedGrok");
+    file(join(exported, "SOUL.md"), "User-owned Grok bot instructions");
+    file(join(exported, "MEMORY.md"), "GROK_MEMORY_MARKER: research the release checklist");
+    file(join(exported, "skills/check/SKILL.md"), "---\nname: check\ndescription: Validate research evidence\n---\nRead references/guide.md before making a claim.");
+    file(join(exported, "skills/check/references/guide.md"), "GROK_SKILL_REFERENCE");
+    const importer = createAgentImports({ hermes, grok }); importer.addFolder(exported, "grok");
+    const source = importer.discover().candidates.find(source => source.exported)!;
+    const preview = importer.preview({ sourceId: source.id });
+    assert.ok(preview.bots[0].memoryBytes > 0); assert.equal(preview.bots[0].skills.length, 1);
+    const result = importer.commit(preview.id);
+    assert.match(readBotContext(result.bots[0]), /GROK_MEMORY_MARKER/);
+    assert.match(readSoul(result.bots[0]), /User-owned Grok bot instructions/);
+    assert.equal(readInstalledSkill(result.skills[0])?.status, "approved");
+    assert.deepEqual(getBot(result.bots[0])?.skills, result.skills);
+    assert.equal(readFileSync(join(process.env.LINUBOT_DATA!, "skills", result.skills[0], "references/guide.md"), "utf8"), "GROK_SKILL_REFERENCE");
+    assert.ok(createAgentImports({ hermes, grok }).discover().candidates.some(candidate => candidate.id === source.id));
+  });
+
+  it("attaches more than forty imported skills without failing after preview", () => {
+    for (let i = 0; i < 45; i++) file(join(hermes, `skills/extra-${i}/SKILL.md`), `---\nname: extra-${i}\ndescription: Imported procedure ${i}\n---\nFollow procedure ${i}.`);
+    const importer = createAgentImports({ hermes, grok }); const source = importer.discover().candidates.find(source => source.source === "hermes")!;
+    const preview = importer.preview({ sourceId: source.id }); assert.equal(preview.bots[0].skills.length, 46);
+    const result = importer.commit(preview.id); assert.equal(getBot(result.bots[0])?.skills.length, 46);
+    assert.ok(result.skills.every(name => readInstalledSkill(name)?.status === "approved"));
+  });
+
+  it("preserves all supported memory files instead of clipping the combined context", () => {
+    for (const name of ["MEMORY.md", "USER.md", "memories/MEMORY.md", "memories/USER.md"]) file(join(hermes, name), "x".repeat(48000) + `END_OF_${name}`);
+    const importer = createAgentImports({ hermes, grok }), source = importer.discover().candidates.find(source => source.source === "hermes")!;
+    const preview = importer.preview({ sourceId: source.id, skills: false, history: false });
+    assert.ok(preview.bots[0].memoryBytes > 128 * 1024);
+    const result = importer.commit(preview.id), memory = readBotContext(result.bots[0]);
+    for (const name of ["MEMORY.md", "USER.md", "memories/MEMORY.md", "memories/USER.md"]) assert.ok(memory.includes(`END_OF_${name}`));
+  });
+
+  it("can keep imported skills as drafts and refuses unsupported exported folders", () => {
+    const importer = createAgentImports({ hermes, grok }); const id = importer.discover().candidates.find(source => source.source === "hermes")!.id;
+    const result = importer.commit(importer.preview({ sourceId: id, activateSkills: false }).id);
+    assert.deepEqual(getBot(result.bots[0])?.skills, []); assert.equal(readInstalledSkill(result.skills[0]), null);
+    assert.throws(() => importer.addFolder(root, "grok"), /does not contain/);
+    const link = join(root, "unsafe-export"); symlinkSync(hermes, link);
+    assert.throws(() => importer.addFolder(link, "hermes"), /does not contain/);
+  });
+
   it("imports many sources in one snapshot, deduplicates group members and reuses successful receipts", () => {
     const importer = createAgentImports({ hermes, grok });
     const ids = importer.discover().candidates.map(source => source.id);
@@ -88,7 +133,7 @@ describe("agent import conversion", () => {
     assert.equal(readFileSync(join(hermes, "SOUL.md"), "utf8"), "The source was edited after the preview.");
     assert.deepEqual(readMemory(), []); assert.deepEqual(readUserEntries(), []);
     assert.equal(listJobs()[0].enabled, false);
-    assert.equal(readInstalledSkill(result.skills[0]), null); assert.equal(readInstalledSkill(result.skills[0], true)?.status, "draft");
+    assert.equal(readInstalledSkill(result.skills[0])?.status, "approved"); assert.ok(getBot(bot)?.skills.includes(result.skills[0]));
     assert.equal(readFileSync(join(process.env.LINUBOT_DATA!, "skills", result.skills[0], "references/guide.md"), "utf8"), "RESEARCH_GUIDE");
     assert.deepEqual(readdirSync(join(process.env.LINUBOT_DATA!, "skills", result.skills[0])).sort(), ["SKILL.md", "references"]);
     assert.equal(createHash("sha256").update(readFileSync(join(hermes, "state.db"))).digest("hex"), original);

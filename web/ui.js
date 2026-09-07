@@ -135,6 +135,7 @@ export async function api(path, { method = "GET", body, signal, timeout = 25000 
     let data;
     try { data = raw ? JSON.parse(raw) : {}; }
     catch { throw new Error(`The local server returned an unreadable response (${response.status}).`); }
+    if (response.status === 401 && response.headers.get("x-linubot-pairing") === "required") window.location.assign("/phone-pair");
     if (!response.ok) { const error = new Error(data.error || `Request failed (${response.status}).`); error.status = response.status; throw error; }
     return data;
   } catch (error) {

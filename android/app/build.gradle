@@ -1,0 +1,10 @@
+plugins { id 'com.android.application' }
+android {
+    namespace 'sh.agent.linubot'
+    compileSdk 37
+    defaultConfig { applicationId 'sh.agent.linubot'; minSdk 26; targetSdk 35; versionCode 20900; versionName '2.9.0' }
+    buildTypes { release { minifyEnabled false } }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_17; targetCompatibility JavaVersion.VERSION_17 }
+}
+
+dependencies { implementation 'androidx.core:core:1.19.0' }

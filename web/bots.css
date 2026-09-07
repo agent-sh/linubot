@@ -186,3 +186,9 @@
 .provider-row > span:last-child { font-size: .8rem; white-space: nowrap; }
 .import-preview-bot { padding: 1rem 0; border-bottom: 1px solid var(--line, #ddd); }
 .import-preview-bot pre { max-height: 22rem; overflow: auto; white-space: pre-wrap; }
+
+@media (max-width: 520px) {
+  .conversation-header .actions { width: auto; padding-left: 0; }
+  .conversation-identity > div { min-width: 0; }
+  .conversation-identity h1, .conversation-identity p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+}

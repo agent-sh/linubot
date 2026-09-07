@@ -27,6 +27,7 @@ export interface Section {
 
 const COLORS = ["#0f766e", "#1d4ed8", "#b45309", "#be123c", "#4d7c0f", "#0e7490", "#7c3aed", "#374151"];
 const MAX_SOUL_BYTES = 128 * 1024;
+const MAX_IMPORTED_CONTEXT_BYTES = 256 * 1024;
 
 function directory(path: string): boolean {
   const stat = lstatSync(path, { throwIfNoEntry: false });
@@ -166,7 +167,7 @@ export function getBot(name: string): BotProfile | null {
   const p = readJson<Partial<BotProfile> | undefined>(path, undefined);
   if (p === undefined) return null;
   if (!p || typeof p !== "object" || Array.isArray(p) || p.name !== name) throw new Error(`invalid stored bot profile: ${name}`);
-  const skills = textList(p.skills === undefined ? [] : p.skills, "skills", 40, 40);
+  const skills = textList(p.skills === undefined ? [] : p.skills, "skills", 256, 40);
   if (skills.some((skill) => !validSkillName(skill))) throw new InputError("invalid skill name in bot profile");
   if (p.pinned !== undefined && typeof p.pinned !== "boolean") throw new InputError("pinned must be a boolean");
   if (p.color !== undefined && (typeof p.color !== "string" || !/^#[0-9a-f]{6}$/i.test(p.color))) throw new Error(`invalid stored bot color: ${name}`);
@@ -211,7 +212,7 @@ export function updateBot(name: string, patch: BotOptions & { skills?: string[];
   else if (patch.providerId !== undefined) profile.providerId = requiredText(patch.providerId, "Provider connection", 80);
   if (patch.mascotSeed !== undefined) profile.mascotSeed = mascotSeed(patch.mascotSeed);
   if (patch.skills !== undefined) {
-    const skills = textList(patch.skills, "skills", 40, 40);
+    const skills = textList(patch.skills, "skills", 256, 40);
     for (const skill of skills) {
       if (!validSkillName(skill)) throw new InputError("invalid skill name");
       if (!readInstalledSkill(skill)) throw new InputError(`skill is not installed and approved: ${skill}`);
@@ -280,13 +281,13 @@ export function readSoul(name: string): string {
 }
 
 export function readBotContext(name: string): string {
-  const path = storedFile(join(botDir(name), "imported-context.md"), MAX_SOUL_BYTES);
+  const path = storedFile(join(botDir(name), "imported-context.md"), MAX_IMPORTED_CONTEXT_BYTES);
   try { return readFileSync(path, "utf8"); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return ""; throw error; }
 }
 export function writeBotContext(name: string, value: string): void {
   if (!getBot(name)) throw new InputError("Unknown bot", 404);
-  if (typeof value !== "string" || Buffer.byteLength(value) > MAX_SOUL_BYTES) throw new InputError("Imported context must be at most 128 KiB");
-  const path = storedFile(join(botDir(name), "imported-context.md"), MAX_SOUL_BYTES), temporary = `${path}.${randomUUID()}.tmp`;
+  if (typeof value !== "string" || Buffer.byteLength(value) > MAX_IMPORTED_CONTEXT_BYTES) throw new InputError("Imported context must be at most 256 KiB");
+  const path = storedFile(join(botDir(name), "imported-context.md"), MAX_IMPORTED_CONTEXT_BYTES), temporary = `${path}.${randomUUID()}.tmp`;
   try { writeFileSync(temporary, value, { flag: "wx", mode: 0o600 }); renameSync(temporary, path); } finally { rmSync(temporary, { force: true }); }
 }
 

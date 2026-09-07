@@ -91,7 +91,7 @@ else {
         } catch (error) { resume(); throw new Error('The staged update could not be activated. Restart Linubot or retry the installer.'); }
       } } : {}),
     });
-    backend = createApp({ accessToken: token, onProviderConnected: show, updates });
+    backend = createApp({ accessToken: token, onProviderConnected: show, updates, chooseImportFolder: async () => { const result = await dialog.showOpenDialog(window, { title: "Choose an exported bot folder", properties: ["openDirectory"] }); return result.canceled ? undefined : result.filePaths[0]; } });
     await new Promise((resolve, reject) => { backend.server.once('error', reject); backend.server.listen(0, '127.0.0.1', resolve); });
     origin = `http://127.0.0.1:${backend.server.address().port}`;
     window = new BrowserWindow({ width: 1400, height: 940, minWidth: 880, minHeight: 600, title: 'Linubot', icon, show: false, backgroundColor: '#f5f3ed',

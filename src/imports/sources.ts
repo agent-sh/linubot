@@ -1,3 +1,4 @@
+import { dataDir, readJson, writeJson } from "../store.ts";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { homedir } from "node:os";
@@ -12,7 +13,7 @@ const object = (value: unknown): RecordValue => value && typeof value === "objec
 const text = (value: unknown, max = 100000) => typeof value === "string" ? value.slice(0, max) : "";
 export const sourceId = (value: string) => createHash("sha256").update(value).digest("hex").slice(0, 20);
 export function importName(value: string, fallback = "Imported"): string { return value.normalize("NFKD").replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^[-_]+|[-_]+$/g, "").slice(0, 32) || fallback; }
-export interface ImportCandidate { id: string; source: "hermes" | "grok"; name: string; description: string; kind: "bot" | "group"; location: string }
+export interface ImportCandidate { id: string; source: "hermes" | "grok"; name: string; description: string; kind: "bot" | "group"; location: string; exported?: boolean }
 interface SourceRef extends ImportCandidate { root: string; row?: RecordValue; account?: string; members?: string[] }
 export interface ImportedMessage { role: "user" | "assistant"; text: string; at?: string; author?: string; authorName?: string }
 export interface ImportedSkill { key: string; name: string; description: string; body: string; files: { path: string; bytes: Buffer }[] }
@@ -77,6 +78,12 @@ export function createImportSources(roots: ImportRoots = {}) {
         } catch (error) { warnings.push(error instanceof Error ? error.message : "A Grok Bot cache could not be read."); }
       }
     }
+    const savedFolders = readJson<{ path: string; source: "grok" | "hermes" }[]>(join(dataDir(), "import-folders.json"), []);
+    for (const entry of savedFolders.slice(0, 100)) {
+      if (!["grok", "hermes"].includes(entry.source) || !folder(entry.path)) continue;
+      const root = resolve(entry.path), id = sourceId(`${entry.source}-folder:${root}`);
+      refs.set(id, { id, source: entry.source, name: basename(root), kind: "bot", description: `Exported ${entry.source === "grok" ? "Grok" : "Hermes"} bot folder`, location: root, root, exported: true });
+    }
     return { candidates: [...refs.values()].map(({ root: _root, row: _row, account: _account, members: _members, ...candidate }) => candidate), warnings, locations: { hermes, grok } };
   }
   function grokMessages(ref: SourceRef): ImportedMessage[] {
@@ -121,12 +128,14 @@ export function createImportSources(roots: ImportRoots = {}) {
               else if (entry.isFile() && target !== join(path, "SKILL.md")) { const value = bytes(root, target, 2 * 1024 * 1024)!; total += value.length; if (total > 16 * 1024 * 1024 || files.length >= 200) throw new InputError("Selected skill bundles exceed the import limit"); files.push({ path: relative(path, target), bytes: value }); }
             }
           }
-          bundle(path, 0); skills.push({ key: relative(root, path), name: text(fields.name, 80) || basename(path), description: text(fields.description, 1500) || `Imported Hermes skill ${basename(path)}`, body, files }); return;
+          bundle(path, 0); skills.push({ key: relative(root, path), name: text(fields.name, 80) || basename(path), description: text(fields.description, 1500) || `Imported ${ref.source === "hermes" ? "Hermes" : "Grok"} skill ${basename(path)}`, body, files }); return;
         }
         for (const entry of readdirSync(path, { withFileTypes: true })) if (entry.isDirectory() && !entry.isSymbolicLink() && !entry.name.startsWith(".")) visit(join(path, entry.name), depth + 1);
       }
       visit(join(root, "skills"), 0);
     }
+    if (options.memory && !notes.length) warnings.push(`No saved memory files were found for ${ref.name}.`);
+    if (options.skills && !skills.length) warnings.push(`No supported skills were found for ${ref.name}.`);
     const routines: ImportedRoutine[] = [], cronFile = join(root, "cron/jobs.json");
     if (options.routines && folder(join(root, "cron"))) {
       const jobs = json(root, cronFile).jobs;
@@ -157,7 +166,7 @@ export function createImportSources(roots: ImportRoots = {}) {
       } catch { throw new InputError("This Hermes history database has an unsupported schema or is busy. Retry without history."); }
       finally { db.close(); }
     }
-    return { candidate: ref, soul, context: notes.join("\n\n").slice(0, 100000), model: text(model.default || config.model, 200), provider: text(model.provider, 200), skills, routines, messages, warnings };
+    return { candidate: ref, soul, context: notes.join("\n\n"), model: text(model.default || config.model, 200), provider: text(model.provider, 200), skills, routines, messages, warnings };
   }
   function load(id: string, options: { history: boolean; skills: boolean; memory: boolean; routines: boolean }): SourceBundle {
     const ref = refs.get(id); if (!ref) throw new InputError("Import source is unavailable. Refresh the source list.", 404);
@@ -165,7 +174,7 @@ export function createImportSources(roots: ImportRoots = {}) {
     if (ref.kind === "group" && (memberRefs.length < 2 || memberRefs.length !== ref.members?.length || memberRefs.length > 20 || new Set(memberRefs.map((r) => r.id)).size !== memberRefs.length)) throw new InputError("All group members must be available in the Grok Bot cache before importing this group.");
     let size = 0;
     const bots = memberRefs.map((ref): SourceBot => {
-      const bot: SourceBot = ref.source === "hermes" ? hermesBot(ref, options) : { candidate: ref, soul: "", context: "", model: "", provider: "xai-oauth", skills: [], routines: [], messages: options.history ? grokMessages(ref) : [], warnings: ["Grok Bot's local cache contains its description and recent conversation. Cloud-only instructions, memories, files, skills and schedules are unavailable here."] };
+      const bot: SourceBot = (ref.source === "hermes" || ref.exported) ? hermesBot(ref, options) : { candidate: ref, soul: "", context: "", model: "", provider: "xai-oauth", skills: [], routines: [], messages: options.history ? grokMessages(ref) : [], warnings: ["Grok Bot's local cache contains its description and recent conversation. Cloud-only instructions, memories, files, skills and schedules are unavailable here."] };
       size += Buffer.byteLength(bot.soul + bot.context + bot.messages.map((m) => m.text).join("")) + bot.skills.reduce((n, s) => n + Buffer.byteLength(s.body) + s.files.reduce((n, f) => n + f.bytes.length, 0), 0);
       if (size > 24 * 1024 * 1024) throw new InputError("This import is too large. Try without history or skills.");
       return bot;
@@ -174,5 +183,16 @@ export function createImportSources(roots: ImportRoots = {}) {
     if (size + Buffer.byteLength(groupMessages.map((m) => m.text).join("")) > 24 * 1024 * 1024) throw new InputError("This import is too large. Try without history or skills.");
     return { bots, ...(ref.kind === "group" ? { group: ref } : {}), messages: groupMessages, warnings: [...new Set(bots.flatMap((b) => b.warnings))] };
   }
-  return { discover, load };
+  function addFolder(path: string, source: string) {
+    if (typeof path !== "string" || !path.trim() || !["hermes", "grok"].includes(source)) throw new InputError("Choose an exported bot folder and source");
+    const root = resolve(path);
+    if (!folder(root) || !["SOUL.md", "MEMORY.md", "USER.md", "memories", "skills", "config.yaml"].some(name => lstatSync(join(root, name), { throwIfNoEntry: false }))) throw new InputError("This folder does not contain supported bot instructions, memories or skills");
+    const file = join(dataDir(), "import-folders.json"), folders = readJson<{ path: string; source: string }[]>(file, []);
+    if (!folders.some(entry => entry.path === root && entry.source === source)) {
+      if (folders.length >= 100) throw new InputError("At most 100 exported folders can be registered");
+      writeJson(file, [...folders, { path: root, source }]);
+    }
+    return discover();
+  }
+  return { discover, load, addFolder };
 }

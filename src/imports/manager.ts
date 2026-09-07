@@ -4,15 +4,15 @@ import { randomUUID } from "node:crypto";
 import { createImportSources, importName, sourceId } from "./sources.ts";
 import type { ImportRoots, ImportedMessage, SourceBundle } from "./sources.ts";
 import { dataDir, readJson, writeJson } from "../store.ts";
-import { createBot, getBot, listBots, validName, writeSoul, writeBotContext } from "../bots/manager.ts";
+import { createBot, getBot, listBots, validName, writeSoul, writeBotContext, updateBot } from "../bots/manager.ts";
 import { getProvider } from "../auth/store.ts";
-import { saveLearnedSkill, validateLearnedSkill } from "../marketplace/search.ts";
+import { saveLearnedSkill, validateLearnedSkill, approveSkill } from "../marketplace/search.ts";
 import { addJob } from "../crons/scheduler.ts";
 import { appendEvent } from "../events/log.ts";
 import { listGroups } from "../chat/session.ts";
 import { InputError } from "../errors.ts";
 
-interface ImportOptions { sourceId?: string; sourceIds?: string[]; name?: string; providerId?: string; model?: string; memory?: boolean; skills?: boolean; history?: boolean; routines?: boolean }
+interface ImportOptions { sourceId?: string; sourceIds?: string[]; name?: string; providerId?: string; model?: string; memory?: boolean; skills?: boolean; history?: boolean; routines?: boolean; activateSkills?: boolean }
 interface ImportResult { id: string; scope: string; bots: string[]; skills: string[]; routines: string[]; messages: number; warnings: string[]; groups: { id: string; name: string }[] }
 interface Prepared { bundle: SourceBundle; options: ImportOptions; targets: { name: string; source: string; existing: boolean }[]; expires: number; providerId?: string; model: string; groups: { id: string; name: string; sources: string[]; messages: ImportedMessage[] }[] }
 const uuid = /^[0-9a-f-]{36}$/;
@@ -34,7 +34,7 @@ export function createAgentImports(roots: ImportRoots = {}) {
     if (!Array.isArray(selected) || !selected.length || selected.length > 100 || selected.some(id => typeof id !== "string" || !id || id.length > 80)) throw new InputError("Choose between 1 and 100 import sources");
     const ids = [...new Set(selected)];
     if (ids.length > 1 && options.name !== undefined) throw new InputError("A custom name is available when importing one bot");
-    for (const key of ["memory", "skills", "history", "routines"] as const) if (options[key] !== undefined && typeof options[key] !== "boolean") throw new InputError(`Invalid import option: ${key}`);
+    for (const key of ["memory", "skills", "history", "routines", "activateSkills"] as const) if (options[key] !== undefined && typeof options[key] !== "boolean") throw new InputError(`Invalid import option: ${key}`);
     if (options.name !== undefined && !validName(options.name)) throw new InputError("Choose a name using up to 40 letters, digits, hyphens or underscores");
     const provider = getProvider(options.providerId);
     if (options.model !== undefined && typeof options.model !== "string") throw new InputError("Invalid import model");
@@ -69,9 +69,9 @@ export function createAgentImports(roots: ImportRoots = {}) {
     const id = randomUUID();
     checkGroups(groups, targets);
     pending.set(id, { bundle, options: { ...options }, targets, expires: Date.now() + 10 * 60_000, providerId: options.providerId, model: options.model?.trim() || "default", groups });
-    return { id, targets: targets.map((target) => ({ ...target })), group: bundle.group?.name, groups: groups.map(({ id, name }) => ({ id, name })), provider: { name: provider.name, id: provider.id, model, ready: Boolean(provider.apiKey) || provider.auth === "none" },
+    return { id, activateSkills: options.activateSkills !== false, targets: targets.map((target) => ({ ...target })), group: bundle.group?.name, groups: groups.map(({ id, name }) => ({ id, name })), provider: { name: provider.name, id: provider.id, model, ready: Boolean(provider.apiKey) || provider.auth === "none" },
       bots: bundle.bots.map((bot, index) => ({ name: targets[index].name, originalName: bot.candidate.name, sourceModel: bot.model, sourceProvider: bot.provider, description: bot.candidate.description, soul: bot.soul,
-        context: options.memory === false ? "" : bot.context, skills: bot.skills.map((skill) => ({ name: skill.name, description: skill.description, files: skill.files.length })), routines: options.routines ? bot.routines.map((routine) => ({ ...routine })) : [], messages: bot.messages.length })),
+        context: options.memory === false ? "" : bot.context, memoryBytes: options.memory === false ? 0 : Buffer.byteLength(bot.context), skills: bot.skills.map((skill) => ({ name: skill.name, description: skill.description, files: skill.files.length })), routines: options.routines ? bot.routines.map((routine) => ({ ...routine })) : [], messages: bot.messages.length })),
       groupMessages: groups.reduce((sum, group) => sum + group.messages.length, 0), warnings: [...bundle.warnings], expiresAt: new Date(Date.now() + 10 * 60_000).toISOString() };
   }
   function checkGroups(groups: Prepared["groups"], targets: Prepared["targets"]) {
@@ -112,13 +112,16 @@ export function createAgentImports(roots: ImportRoots = {}) {
         if (source.soul.trim()) writeSoul(target.name, source.soul);
         if (options.memory !== false && source.context) writeBotContext(target.name, source.context);
         importMessages(`bot:${target.name}`, source.messages, target.name);
+        const attachedSkills: string[] = [];
         for (const skill of source.skills) {
           const name = skillName(target.name, skill.name, skill.key);
           if (existsSync(join(dataDir(), "skills", name))) throw new InputError("An imported skill name is already in use. Nothing was replaced.", 409);
           if (!saveLearnedSkill({ name, description: skill.description, body: skill.body })) throw new InputError("An imported skill already exists", 409);
           skills.push(name);
           for (const file of skill.files) { const path = join(dataDir(), "skills", name, file.path); mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); writeFileSync(path, file.bytes, { flag: "wx", mode: 0o600 }); }
+          if (options.activateSkills !== false) { approveSkill(name); attachedSkills.push(name); }
         }
+        if (options.activateSkills !== false && attachedSkills.length) updateBot(target.name, { skills: attachedSkills });
         if (options.routines) for (const routine of source.routines) {
           const name = `${importName(`${target.name}-${routine.name}`).slice(0, 30)}-${sourceId(`${target.source}:${routine.name}`).slice(0, 8)}`;
           const jobs = readJson<{ name: string }[]>(join(dataDir(), "jobs.json"), []); if (jobs.some((job) => job.name === name)) throw new InputError("An imported routine name is already in use", 409);
@@ -142,5 +145,5 @@ export function createAgentImports(roots: ImportRoots = {}) {
       throw error;
     }
   }
-  return { discover, preview, commit };
+  return { discover, preview, commit, addFolder: sources.addFolder };
 }
