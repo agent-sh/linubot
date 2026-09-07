@@ -64,6 +64,7 @@ public class MainActivity extends Activity {
     }
     private void connect(String address) { connect(address,address+"/"); }
     private void connect(String address,String destination) {
+        if (browser != null) { browser.stopLoading(); browser.destroy(); browser = null; }
         layout();
         LinearLayout bar = new LinearLayout(this); bar.setGravity(android.view.Gravity.CENTER_VERTICAL); bar.setPadding(dp(8),0,dp(8),0); root.addView(bar);
         connectionStatus = new TextView(this); connectionStatus.setText("Linubot"); bar.addView(connectionStatus,new LinearLayout.LayoutParams(0,dp(48),1));
@@ -74,9 +75,14 @@ public class MainActivity extends Activity {
             else CookieManager.getInstance().removeAllCookies(removed -> { CookieManager.getInstance().flush(); getPreferences(MODE_PRIVATE).edit().remove("origin").apply(); showSetup(); });
         }).setNegativeButton("Close", null).show());
         browser = new WebView(this); root.addView(browser,new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,0,1));
-        WebSettings settings = browser.getSettings(); settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true); settings.setAllowFileAccess(false); settings.setAllowContentAccess(false); settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW); settings.setSafeBrowsingEnabled(true); settings.setJavaScriptCanOpenWindowsAutomatically(false);
+        WebSettings settings = browser.getSettings(); settings.setJavaScriptEnabled(true); settings.setDomStorageEnabled(true); settings.setAllowFileAccess(false); settings.setAllowContentAccess(false); settings.setAllowFileAccessFromFileURLs(false); settings.setAllowUniversalAccessFromFileURLs(false); settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW); settings.setSafeBrowsingEnabled(true); settings.setJavaScriptCanOpenWindowsAutomatically(false);
         CookieManager.getInstance().setAcceptCookie(true); CookieManager.getInstance().setAcceptThirdPartyCookies(browser,false);
         browser.setWebViewClient(new WebViewClient() {
+            @Override public android.webkit.WebResourceResponse shouldInterceptRequest(WebView view, WebResourceRequest request) {
+                String scheme=request.getUrl().getScheme();
+                if (("http".equals(scheme) || "https".equals(scheme)) && !sameOrigin(request.getUrl())) return new android.webkit.WebResourceResponse("text/plain", "UTF-8", 403, "Different computer blocked", java.util.Collections.emptyMap(), new java.io.ByteArrayInputStream(new byte[0]));
+                return null;
+            }
             @Override public void onPageStarted(WebView view,String url,android.graphics.Bitmap icon) { loadFailed=false; connectionStatus.setText("Connecting…"); }
             @Override public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 if (sameOrigin(request.getUrl())) return false;
@@ -88,6 +94,7 @@ public class MainActivity extends Activity {
             @Override public void onPageFinished(WebView view,String url) { CookieManager.getInstance().flush(); if (!loadFailed && sameOrigin(Uri.parse(url))) connectionStatus.setText("Linubot"); }
         });
         browser.setDownloadListener((url,userAgent,contentDisposition,mimeType,length) -> download(url,length));
+        if (!sameOrigin(Uri.parse(destination))) throw new IllegalArgumentException("Only the selected HTTPS computer can be loaded");
         browser.loadUrl(destination);
     }
     private void scanQr() {
