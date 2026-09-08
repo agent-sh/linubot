@@ -1,12 +1,13 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, chmodSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { parse } from 'yaml';
 import * as asar from '@electron/asar';
-import { checkPublicationRef, verifyArtifacts, prepareReleaseDist, verifyPublishedManifest, assetNames } from '../scripts/release.mjs';
+import { checkPublicationRef, verifyArtifacts, prepareReleaseDist, verifyPublishedManifest, assetNames, verifyPayloadModes, canonicalNotes, readTagNotes, ensureReleaseTag } from '../scripts/release.mjs';
 
 it('local tag requests require synchronized main while hosted publication accepts the exact tag on main', () => {
   const local = { hosted: false, branch: 'main', head: 'commit', mainHead: 'commit' };
@@ -70,17 +71,18 @@ it('the local resume path pushes only the annotated tag and never invokes a rele
   try {
     const put = (path, bytes, options) => { mkdirSync(join(path, '..'), { recursive: true }); writeFileSync(path, bytes, options); };
     const sha = (bytes) => createHash('sha256').update(bytes).digest('hex');
-    const version = '2.11.0', head = 'a'.repeat(40), notes = 'Fixture notes\n';
+    const version = '2.11.0', head = 'a'.repeat(40), notes = '# Fixture release\n\nHard break  \nFinal line  ';
     put(join(dir, 'package.json'), JSON.stringify({ version }));
     put(join(dir, 'android/app/build.gradle'), "versionName '2.11.0'; versionCode 21100");
     put(join(dir, 'notes.md'), notes);
     const assets = assetNames(version).map((name) => { put(join(dir, 'release', name), 'fixture'); return { name, size: 7, sha256: sha('fixture') }; });
-    put(join(dir, 'release/.release-2.11.0.json'), JSON.stringify({ version, head, notesHash: sha(notes), assets }));
+    put(join(dir, 'release/.release-2.11.0.json'), JSON.stringify({ version, head, notesHash: sha(canonicalNotes(Buffer.from(notes))), assets }));
     put(join(dir, '.local/state/linubot-android-signing/release.keystore'), 'fixture');
     put(join(dir, '.local/state/linubot-android-signing/password'), 'fixture');
     for (const tool of ['zipalign', 'apksigner']) put(join(dir, 'sdk/build-tools/36.0.0', tool), 'fixture');
     put(join(dir, 'bin/git'), `#!/usr/bin/env node
 const fs=require('node:fs'),a=process.argv.slice(2);fs.appendFileSync(process.env.CALLS,JSON.stringify(['git',...a])+'\\n');
+if(process.umask()!==0o022)process.exit(43);
 if(a[0]==='rev-parse')console.log(a[1]==='--show-toplevel'?process.cwd():'${head}');
 else if(a[0]==='branch')console.log(process.env.FIXTURE_BRANCH || 'main');
 else if(a[0]==='remote')console.log('https://github.com/agent-sh/linubot.git');
@@ -90,7 +92,7 @@ const fs=require('node:fs'),a=process.argv.slice(2);fs.appendFileSync(process.en
 if(a.join(' ')!=='auth status')process.exit(42);
 `, { mode: 0o755 });
     const calls = join(dir, 'calls');
-    const result = execFileSync(process.execPath, [join(process.cwd(), 'scripts/release.mjs'), '--resume', '--notes', join(dir, 'notes.md')], {
+    const result = execFileSync('bash', ['-c', 'umask 077; exec "$@"', 'release-mask-test', process.execPath, join(process.cwd(), 'scripts/release.mjs'), '--resume', '--notes', join(dir, 'notes.md')], {
       cwd: dir, env: { ...process.env, HOME: dir, ANDROID_HOME: join(dir, 'sdk'), GITHUB_ACTIONS: '', DISPLAY: ':fixture', PATH: `${join(dir, 'bin')}:${process.env.PATH}`, CALLS: calls }, encoding: 'utf8',
     });
     assert.match(result, /Only the tag workflow publishes/);
@@ -129,4 +131,80 @@ it('release dist preparation honors the explicit package source-map exclusion', 
     prepareReleaseDist(); assert.throws(() => readFileSync('dist/app.js.map'), /ENOENT/);
     assert.equal(readFileSync('dist/app.js', 'utf8'), 'runtime');
   } finally { process.chdir(previous); rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+it('verbatim tag notes preserve Markdown headings, hard breaks and blank lines across resume', () => {
+  const previous = process.cwd(), dir = mkdtempSync(join(tmpdir(), 'linubot-tag-notes-'));
+  try {
+    process.chdir(dir);
+    execFileSync('git', ['init', '--quiet', '--initial-branch=main']);
+    for (const [key, value] of [['user.name', 'Release fixture'], ['user.email', 'fixture@example.com'], ['tag.gpgSign', 'false'], ['commit.gpgSign', 'false']]) execFileSync('git', ['config', key, value]);
+    execFileSync('git', ['commit', '--quiet', '--allow-empty', '-m', 'Fixture']);
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    for (const [index, text] of ['# Release heading\n\nFirst line  \nSecond line\n\n## Fixes\nLast line  ', '# Heading\n\nParagraph  \n\n\n'].entries()) {
+      const notes = Buffer.from(text), tag = `fixture-${index}`;
+      writeFileSync('notes.md', notes);
+      ensureReleaseTag(tag, head, 'notes.md', false);
+      assert.deepEqual(readTagNotes(tag), canonicalNotes(notes));
+      const object = execFileSync('git', ['rev-parse', tag]);
+      ensureReleaseTag(tag, head, 'notes.md', true);
+      // Supplying the canonical final LF is equivalent; no other whitespace is.
+      writeFileSync('notes.md', canonicalNotes(notes));
+      ensureReleaseTag(tag, head, 'notes.md', true);
+      assert.deepEqual(execFileSync('git', ['rev-parse', tag]), object);
+      writeFileSync('notes.md', text.replace('  ', ''));
+      assert.throws(() => ensureReleaseTag(tag, head, 'notes.md', true), /notes differ/);
+      writeFileSync('notes.md', text.replace(/^#.*\n/, ''));
+      assert.throws(() => ensureReleaseTag(tag, head, 'notes.md', true), /notes differ/);
+    }
+  } finally { process.chdir(previous); rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('workflow signing files stay private while generated root-owned Debian payloads are readable', { skip: process.platform !== 'linux' }, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linubot-release-modes-'));
+  try {
+    const workflow = parse(readFileSync('.github/workflows/release.yml', 'utf8'));
+    const step = workflow.jobs.release.steps.find((step) => step.name === 'Build, verify and publish the existing tag');
+    mkdirSync(join(dir, 'bin'));
+    writeFileSync(join(dir, 'bin/dbus-run-session'), `#!/usr/bin/python3
+import os,stat,subprocess,tarfile,io,json
+from pathlib import Path
+signing=Path.home()/'.local/state/linubot-android-signing'
+assert stat.S_IMODE(signing.stat().st_mode)==0o700
+for name in ['release.keystore','password']:assert stat.S_IMODE((signing/name).stat().st_mode)==0o600
+assert os.umask(0o022)==0o022, 'Private signing umask leaked into build'
+root=Path('payload');(root/'opt/Linubot/resources').mkdir(parents=True)
+(root/'opt/Linubot/resources/app.asar').write_bytes(b'fixture')
+(root/'opt/Linubot/linubot').write_bytes(b'fixture');(root/'opt/Linubot/linubot').chmod(0o755)
+(root/'DEBIAN').mkdir();(root/'DEBIAN/control').write_text('Package: linubot\\nVersion: 1.0.0\\nArchitecture: amd64\\nMaintainer: Fixture <fixture@example.com>\\nDescription: Fixture\\n')
+subprocess.run(['dpkg-deb','--build','--root-owner-group','payload','fixture.deb'],check=True,stdout=subprocess.DEVNULL)
+archive=subprocess.check_output(['dpkg-deb','--fsys-tarfile','fixture.deb'])
+with tarfile.open(fileobj=io.BytesIO(archive)) as tar:
+ modes={m.name:[m.mode,m.uid,m.gid] for m in tar.getmembers()}
+ assert modes['./opt/Linubot/resources']==[0o755,0,0]
+ assert modes['./opt/Linubot/resources/app.asar']==[0o644,0,0]
+ assert modes['./opt/Linubot/linubot']==[0o755,0,0]
+Path('package-modes.json').write_text(json.dumps(modes))
+`, { mode: 0o755 });
+    execFileSync('bash', ['-c', `umask 077\n${step.run}`], {
+      cwd: dir, env: { ...process.env, HOME: dir, PATH: `${join(dir, 'bin')}:${process.env.PATH}`, ANDROID_KEYSTORE_BASE64: Buffer.from('fixture key').toString('base64'), ANDROID_STORE_PASSWORD: 'fixture password' },
+    });
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, 'package-modes.json'), 'utf8'))['./opt/Linubot/resources/app.asar'], [0o644, 0, 0]);
+    for (const name of ['release.keystore', 'password']) assert(!existsSync(join(dir, '.local/state/linubot-android-signing', name)), 'Workflow must clean signing files');
+    const unpack = (name) => {
+      const target = join(dir, name);
+      execFileSync('dpkg-deb', ['-x', join(dir, 'fixture.deb'), target]);
+      return target;
+    };
+    verifyPayloadModes(unpack('good'));
+    // The builder still owns and can read these files. The gate must reject
+    // their archived other-user permissions, regardless of the builder's access.
+    for (const [name, path, mode] of [['file', 'opt/Linubot/resources/app.asar', 0o600], ['directory', 'opt/Linubot/resources', 0o700]]) {
+      const file = join(dir, 'payload', path); chmodSync(file, mode);
+      execFileSync('dpkg-deb', ['--build', '--root-owner-group', join(dir, 'payload'), join(dir, 'fixture.deb')], { stdio: 'ignore' });
+      assert.throws(() => verifyPayloadModes(unpack(`bad-${name}`)), /Package permissions deny ordinary users access/);
+      chmodSync(file, name === 'file' ? 0o644 : 0o755);
+    }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

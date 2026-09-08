@@ -52,11 +52,16 @@ jobs:
           : "${ANDROID_KEYSTORE_BASE64:?Set LINUBOT_ANDROID_KEYSTORE_BASE64 in repository Actions secrets}"
           : "${ANDROID_STORE_PASSWORD:?Set LINUBOT_ANDROID_STORE_PASSWORD in repository Actions secrets}"
           signing="$HOME/.local/state/linubot-android-signing"
-          umask 077
-          mkdir -p "$signing"
           trap 'rm -f -- "$signing/release.keystore" "$signing/password"' EXIT
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$signing/release.keystore"
-          printf '%s' "$ANDROID_STORE_PASSWORD" > "$signing/password"
+          (
+            umask 077
+            mkdir -p "$signing"
+            chmod 700 "$signing"
+            printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$signing/release.keystore"
+            printf '%s' "$ANDROID_STORE_PASSWORD" > "$signing/password"
+            chmod 600 "$signing/release.keystore" "$signing/password"
+          )
+          umask 0022
           unset ANDROID_KEYSTORE_BASE64 ANDROID_STORE_PASSWORD
           dbus-run-session -- node scripts/release.mjs --github-release
       - name: Remove signing files even if a prior step failed
