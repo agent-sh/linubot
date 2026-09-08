@@ -16,6 +16,7 @@
     "test:desktop": "npm run build && playwright test",
     "test:workspace": "npm run build && node scripts/workspace-smoke.mjs",
     "install:local": "node scripts/install-local.mjs",
+    "release": "node scripts/release.mjs",
     "release:artifacts": "node scripts/release-artifacts.mjs",
     "test:computer": "npm run build && node scripts/computer-takeover-trial.mjs"
   },

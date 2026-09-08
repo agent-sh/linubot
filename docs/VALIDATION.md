@@ -4,6 +4,13 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+Releases are cut from clean, synchronized `main` with `npm run release --
+--notes /path/to/notes.md`, or the manual release workflow on a qualified runner.
+Use `node scripts/release.mjs --dry-run` to check prerequisites first. The command
+runs acceptance, secret-scan and artifact-integrity gates before verifying a
+draft's assets and publishing it. Installation remains a separate explicit step;
+see [updates](UPDATES.md#release-checks-for-maintainers).
+
 ## Release acceptance: 2.11.0
 
 Checked on 2026-09-08: 334 source tests, eight packaged desktop scenarios,

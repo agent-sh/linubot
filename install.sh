@@ -15,10 +15,11 @@ while [ "$#" -gt 0 ]; do
     --stage-only) linubot_stage=1; shift ;;
     --activate-only) linubot_activate=1; shift ;;
     --launch) linubot_relaunch=1; shift ;;
-    --help) echo 'Usage: bash install.sh [--version 2.11.0] [--build] [--launch]'; exit 0 ;;
+    --help) echo 'Usage: bash install.sh [--version 2.11.0] [--build] [--stage-only | --activate-only] [--launch]'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
+[ "$linubot_stage" = 0 ] || [ "$linubot_activate" = 0 ] || { echo 'Choose either --stage-only or --activate-only.' >&2; exit 1; }
 [ "$(uname -s)" = Linux ] || { echo 'Linubot requires Linux.' >&2; exit 1; }
 [ "$(id -u)" != 0 ] || { echo 'Run this installer as your desktop user, without sudo.' >&2; exit 1; }
 case "$(uname -m)" in x86_64) linubot_arch=x64 ;; *) echo 'This release provides x86_64 Linux builds only.' >&2; exit 1 ;; esac
@@ -109,9 +110,47 @@ mv -Tf "$linubot_root/.linubot-next-$$" "$linubot_root/linubot"
 mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/512x512/apps"
 printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$linubot_root/linubot/linubot" > "$HOME/.local/bin/linubot"
 chmod 755 "$HOME/.local/bin/linubot"
+linubot_systemd=0
+if command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
+  linubot_systemd=1
+  mkdir -p "$HOME/.config/systemd/user"
+  cat > "$HOME/.config/systemd/user/linubot.service" <<'UNIT'
+[Unit]
+Description=Linubot
+PartOf=graphical-session.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+ExecStart=%h/.local/bin/linubot
+Restart=on-failure
+RestartSec=5
+KillMode=process
+UnsetEnvironment=ELECTRON_RUN_AS_NODE
+
+[Install]
+WantedBy=graphical-session.target
+UNIT
+  systemctl --user daemon-reload
+  systemctl --user enable linubot.service
+  for linubot_env in DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_SESSION_TYPE; do
+    if [ "${!linubot_env+x}" ]; then systemctl --user import-environment "$linubot_env"; fi
+  done
+fi
+# Keep ExecStart as the plain launcher to avoid recursive service starts.
+cat > "$HOME/.local/bin/linubot-start" <<'LAUNCHER'
+#!/usr/bin/env bash
+set -euo pipefail
+unset ELECTRON_RUN_AS_NODE
+if command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
+  exec systemctl --user start linubot
+fi
+exec "$HOME/.local/bin/linubot" "$@"
+LAUNCHER
+chmod 755 "$HOME/.local/bin/linubot-start"
 cp "$linubot_target/linubot.png" "$HOME/.local/share/icons/hicolor/512x512/apps/linubot.png"
 # Desktop entry Exec fields escape backslashes, quotes, backticks and dollar signs.
-linubot_launcher="$HOME/.local/bin/linubot"
+linubot_launcher="$HOME/.local/bin/linubot-start"
 linubot_launcher=${linubot_launcher//\\/\\\\}
 linubot_launcher=${linubot_launcher//\"/\\\"}
 linubot_launcher=${linubot_launcher//\$/\\\$}
@@ -126,4 +165,11 @@ echo "Installed Linubot $linubot_version. Open Linubot from your applications me
 # Do not let the launched app inherit the installation lock for its whole lifetime.
 flock -u 9
 exec 9>&-
-if [ "$linubot_relaunch" = 1 ]; then nohup "$HOME/.local/bin/linubot" >/dev/null 2>&1 </dev/null & fi
+if [ "$linubot_relaunch" = 1 ] || [ "$linubot_activate" = 1 ]; then
+  if [ "$linubot_systemd" = 1 ]; then
+    if systemctl --user is-active --quiet linubot-desktop; then systemctl --user stop linubot-desktop; fi
+    systemctl --user restart linubot
+  else
+    nohup env -u ELECTRON_RUN_AS_NODE "$HOME/.local/bin/linubot" >/dev/null 2>&1 </dev/null &
+  fi
+fi

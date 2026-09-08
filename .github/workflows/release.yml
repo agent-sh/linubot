@@ -1,0 +1,55 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      notes:
+        description: Release notes (Markdown)
+        type: string
+        required: true
+      resume:
+        description: Resume publication using the existing verified receipt and artifacts
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: linubot-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    # Dedicated qualified builder, never the owner's running desktop. Provision
+    # Android SDK/JDK 17, signing files, uv/uvx and GUI libraries as documented.
+    runs-on: [self-hosted, Linux, X64, linubot-release]
+    environment: release
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: main
+          fetch-depth: 0
+          # Preserve ignored artifacts and the receipt for --resume. The script
+          # independently rejects dirty source and a moved main branch.
+          clean: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          cache: npm
+      - run: npm ci
+      - name: Validate and publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_NOTES: ${{ inputs.notes }}
+          RELEASE_RESUME: ${{ inputs.resume }}
+        shell: bash
+        run: |
+          notes=$(mktemp "$RUNNER_TEMP/linubot-release-notes.XXXXXXXX")
+          trap 'rm -f -- "$notes"' EXIT
+          printf '%s\n' "$RELEASE_NOTES" > "$notes"
+          args=(--notes "$notes")
+          if [ "$RELEASE_RESUME" = true ]; then args+=(--resume); fi
+          npm run release -- "${args[@]}"

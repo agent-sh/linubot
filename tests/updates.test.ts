@@ -1,6 +1,6 @@
 import { it } from "node:test";
 import assert from "node:assert/strict";
-import { createUpdates, newerVersion, parseRelease } from "../src/updates.ts";
+import { createUpdates, managedUpdateInstaller, newerVersion, parseRelease } from "../src/updates.ts";
 import { createApp } from "../src/server.ts";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -83,5 +83,85 @@ it("installer stages verified release bytes and rejects tampering before touchin
     const bad = spawnSync("bash", args, { env: { ...env, LINUBOT_INSTALL_ROOT: badRoot }, encoding: "utf8" });
     assert.notEqual(bad.status, 0);
     assert.equal(existsSync(join(badRoot, "linubot-2.7.0")), false);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+it("managed updates stage, freeze and hand off activation before quitting", async () => {
+  const events: string[] = [];
+  const install = managedUpdateInstaller({
+    hasActiveWork: () => false,
+    stage: async (update) => { events.push(`stage:${update.version}`); },
+    freeze: () => { events.push("freeze"); return () => events.push("resume"); },
+    activateAfterExit: async (update) => { events.push(`activate:${update.version}`); },
+    quit: () => { events.push("quit"); },
+  });
+  const updates = createUpdates({ version: "2.6.0", check: async () => release(), install });
+  await updates.check();
+  assert.equal(updates.status().canInstall, true);
+  await updates.install();
+  assert.deepEqual(events, ["stage:2.7.0", "freeze", "activate:2.7.0", "quit"]);
+});
+
+it("managed updates retain the staged release if work starts during download", async () => {
+  let active = false, staged = 0;
+  const install = managedUpdateInstaller({
+    hasActiveWork: () => active,
+    stage: async () => { staged++; active = true; },
+    freeze: () => assert.fail("Must not freeze active work"),
+    activateAfterExit: async () => assert.fail("Must not activate"),
+    quit: () => assert.fail("Must not quit"),
+  });
+  const update = parseRelease(release(), "2.6.0", "x64")!;
+  await assert.rejects(install(update), /update is downloaded/);
+  await assert.rejects(install(update), /Finish active tasks before/);
+  assert.equal(staged, 1);
+});
+
+it("managed updates thaw admission if the activation helper cannot start", async () => {
+  let resumed = false;
+  const install = managedUpdateInstaller({
+    hasActiveWork: () => false,
+    stage: async () => {},
+    freeze: () => () => { resumed = true; },
+    activateAfterExit: async () => { throw new Error("systemd-run failed"); },
+    quit: () => assert.fail("Must not quit on failed handoff"),
+  });
+  await assert.rejects(install(parseRelease(release(), "2.6.0", "x64")!), /could not be activated/);
+  assert.equal(resumed, true);
+});
+
+it("installer stage-only leaves integration alone, and activation uses supervision with legacy stop first", { skip: process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "linubot-service-test-"));
+  try {
+    const home = join(dir, "home"), bin = join(dir, "bin"), root = join(home, ".local/opt"), target = join(root, "linubot-2.11.0"), calls = join(dir, "calls");
+    mkdirSync(join(target, "resources"), { recursive: true }); mkdirSync(bin);
+    writeFileSync(join(target, ".linubot-managed"), "2.11.0\n");
+    writeFileSync(join(target, "linubot"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    writeFileSync(join(target, "resources/app.asar"), "fixture");
+    writeFileSync(join(target, "linubot.png"), "fixture");
+    writeFileSync(join(bin, "systemctl"), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$LINUBOT_TEST_CALLS"\nexit 0\n', { mode: 0o755 });
+    for (const name of ["gtk-update-icon-cache", "update-desktop-database"]) writeFileSync(join(bin, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const env = { ...process.env, HOME: home, LINUBOT_INSTALL_ROOT: root, PATH: `${bin}:${process.env.PATH}`, LINUBOT_TEST_CALLS: calls };
+    const args = [resolve("install.sh"), "--version", "2.11.0"];
+    execFileSync("bash", [...args, "--stage-only"], { env });
+    assert.equal(existsSync(calls), false);
+    assert.equal(existsSync(join(root, "linubot")), false);
+    assert.equal(existsSync(join(home, ".config/systemd")), false);
+    execFileSync("bash", [...args, "--activate-only"], { env });
+    const unit = readFileSync(join(home, ".config/systemd/user/linubot.service"), "utf8");
+    for (const setting of ["Description=Linubot", "ExecStart=%h/.local/bin/linubot", "Restart=on-failure", "RestartSec=5", "StartLimitIntervalSec=300", "StartLimitBurst=3", "KillMode=process", "UnsetEnvironment=ELECTRON_RUN_AS_NODE", "PartOf=graphical-session.target", "WantedBy=graphical-session.target"]) assert(unit.includes(setting), setting);
+    const commands = readFileSync(calls, "utf8").trim().split("\n");
+    assert(commands.includes("--user daemon-reload"));
+    assert(commands.includes("--user enable linubot.service"));
+    assert(commands.indexOf("--user stop linubot-desktop") < commands.indexOf("--user restart linubot"));
+    assert(commands.includes("--user stop linubot-desktop"));
+    assert.match(readFileSync(join(home, ".local/share/applications/linubot.desktop"), "utf8"), /Exec=".*linubot-start"/);
+    execFileSync(join(home, ".local/bin/linubot-start"), [], { env });
+    assert(readFileSync(calls, "utf8").endsWith("--user start linubot\n"));
+    // An unavailable user manager takes the plain-launcher path, with no unit writes.
+    writeFileSync(join(bin, "systemctl"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    writeFileSync(join(target, "linubot"), '#!/bin/sh\ntest -z "${ELECTRON_RUN_AS_NODE+x}"\n', { mode: 0o755 });
+    execFileSync(join(home, ".local/bin/linubot-start"), [], { env: { ...env, ELECTRON_RUN_AS_NODE: "1" } });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
