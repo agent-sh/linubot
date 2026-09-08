@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative } from "node:path";
 import { retentionSettings, retentionStatus, runRetention, setRetentionSettings } from "../src/retention.ts";
 import { createComputer } from "../src/computer/workspace.ts";
 const DAY = 86400000, now = Date.now();
@@ -24,6 +27,9 @@ describe("disk retention", () => {
       for (const prefix of ["", "Default/"]) for (const cache of ["Cache", "Code Cache", "GPUCache", "GrShaderCache", "ShaderCache", "DawnCache", "Service Worker/CacheStorage"]) {
         const path = file(`computer-profiles/${owner}/${mode}/${prefix}${cache}/nested/data`); (owner === "bot_idle" ? removed : kept).push(path);
       }
+      const component = file(`computer-profiles/${owner}/${mode}/component_crx_cache/package.crx`);
+      (owner === "bot_idle" ? removed : kept).push(component);
+      for (const name of ["optimization_guide_model_store/model", "WasmTtsEngine/model", "Safe Browsing/database", "CertificateRevocation/database", "PKIMetadata/data", "Default/component_crx_cache/keep", "component_crx_cache_backup/keep"]) kept.push(file(`computer-profiles/${owner}/${mode}/${name}`));
       for (const name of ["Cookies", "Login Data", "Local Storage/data", "IndexedDB/data", "Preferences", "Network/Cookies", "Service Worker/Database/data", "other"]) kept.push(file(`computer-profiles/${owner}/${mode}/Default/${name}`));
     }
     const result = await runRetention({ directory, runningScopes: () => ["group:live"] });
@@ -59,6 +65,17 @@ describe("disk retention", () => {
     assert.equal(readFileSync(path, "utf8"), "cache");
     assert.equal((await runRetention({ directory, now })).files, 1);
   });
+  it("default dry-run and read-only status do not create missing LINUBOT_DATA", async () => {
+    const missing = join(directory, "absent", "data"); process.env.LINUBOT_DATA = missing;
+    assert.deepEqual(await runRetention({ dryRun: true }), { files: 0, bytes: 0, dryRun: true });
+    assert.deepEqual(retentionSettings(), { screenshotDays: 14 });
+    assert.equal(retentionStatus().sizes.screenshots.files, 0);
+    assert.equal(existsSync(join(directory, "absent")), false);
+    const cli = spawnSync(process.execPath, ["--experimental-strip-types", "src/retention.ts", "--dry-run"], { encoding: "utf8" });
+    assert.equal(cli.status, 0, cli.stderr);
+    assert.equal(JSON.parse(cli.stdout).result.files, 0);
+    assert.equal(existsSync(join(directory, "absent")), false);
+  });
   it("coalesces overlapping runs", async () => {
     file(`screenshots/${id(1)}.png`, 20 * DAY);
     const first = runRetention({ directory, now }), second = runRetention({ directory, now });
@@ -80,6 +97,82 @@ describe("disk retention", () => {
     symlinkSync(join(directory, "outside"), join(directory, base, "Default/Service Worker"));
     mkdirSync(join(directory, "screenshots")); symlinkSync(outside, join(directory, "screenshots", `${id(1)}.png`));
     assert.equal((await runRetention({ directory, now })).files, 0); assert.equal(readFileSync(outside, "utf8"), "cache");
+  });
+  const cachePath = "computer-profiles/bot_idle/standard/Cache/nested/Cookies";
+  for (const swappedPath of ["", "computer-profiles", "computer-profiles/bot_idle", "computer-profiles/bot_idle/standard", "computer-profiles/bot_idle/standard/Cache", "computer-profiles/bot_idle/standard/Cache/nested", "computer-profiles/bot_idle/standard/Default/Service Worker", "computer-profiles/bot_idle/standard/component_crx_cache", "screenshots", "live-frames"]) {
+    it(`keeps outside Cookies when ${swappedPath || "data root"} is swapped at unlink`, async t => {
+      const data = join(directory, "store");
+      const targetPath = swappedPath === "screenshots" || swappedPath === "live-frames" ? `${swappedPath}/${id(1)}.png`
+        : swappedPath.endsWith("Service Worker") ? `${swappedPath}/CacheStorage/Cookies`
+        : swappedPath.endsWith("component_crx_cache") ? `${swappedPath}/Cookies` : cachePath;
+      const target = file(`store/${targetPath}`, 20 * DAY);
+      const swap = join(data, swappedPath), outside = join(directory, "outside");
+      // Match the old unresolved suffix, including the PNG path in frame cases.
+      const sentinel = file(`outside/${relative(swap, target)}`, 20 * DAY, "outside Cookies sentinel");
+      const cookies = file("outside/Cookies", 0, "outside Cookies sentinel");
+      const original = fs.unlinkSync; let swapped = false;
+      const hook = t.mock.method(fs, "unlinkSync", (path: fs.PathLike) => {
+        if (!swapped) { swapped = true; fs.renameSync(swap, `${swap}.saved`); fs.symlinkSync(outside, swap); }
+        return original(path);
+      });
+      syncBuiltinESMExports();
+      try {
+        assert.equal((await runRetention({ directory: data, now })).files, 1);
+        assert.equal(swapped, true, "The adversarial interleaving must execute");
+        assert.equal(readFileSync(sentinel, "utf8"), "outside Cookies sentinel");
+        assert.equal(readFileSync(cookies, "utf8"), "outside Cookies sentinel");
+        assert.equal(existsSync(join(`${swap}.saved`, relative(swap, target))), false, "The pinned cache file was deleted");
+      } finally { hook.mock.restore(); syncBuiltinESMExports(); }
+    });
+  }
+  it("refuses a cache symlink swapped in immediately before directory open", async t => {
+    const cache = join(directory, "computer-profiles/bot_idle/standard/Cache");
+    file("computer-profiles/bot_idle/standard/Cache/Cookies");
+    const sentinel = file("outside/Cookies", 0, "outside Cookies sentinel");
+    const original = fs.openSync; let swapped = false;
+    const hook = t.mock.method(fs, "openSync", ((path, flags, mode) => {
+      if (!swapped && String(path).endsWith("/Cache")) { swapped = true; fs.renameSync(cache, `${cache}.saved`); fs.symlinkSync(join(directory, "outside"), cache); }
+      return original(path, flags, mode);
+    }) as typeof fs.openSync);
+    syncBuiltinESMExports();
+    try {
+      assert.equal((await runRetention({ directory })).files, 0);
+      assert.equal(swapped, true);
+      assert.equal(readFileSync(sentinel, "utf8"), "outside Cookies sentinel");
+      assert.equal(readFileSync(join(`${cache}.saved`, "Cookies"), "utf8"), "cache");
+    } finally { hook.mock.restore(); syncBuiltinESMExports(); }
+  });
+  it("does not follow a final file symlink swapped immediately before unlink", async t => {
+    const target = file("computer-profiles/bot_idle/standard/Cache/data");
+    const sentinel = file("outside/Cookies", 0, "outside Cookies sentinel");
+    const original = fs.unlinkSync; let swapped = false;
+    const hook = t.mock.method(fs, "unlinkSync", (path: fs.PathLike) => {
+      if (!swapped) { swapped = true; fs.renameSync(target, `${target}.saved`); fs.symlinkSync(sentinel, target); }
+      return original(path);
+    });
+    syncBuiltinESMExports();
+    try {
+      await runRetention({ directory });
+      assert.equal(swapped, true); assert.equal(readFileSync(sentinel, "utf8"), "outside Cookies sentinel");
+      assert.equal(readFileSync(`${target}.saved`, "utf8"), "cache");
+    } finally { hook.mock.restore(); syncBuiltinESMExports(); }
+  });
+  it("does not follow a parent symlink swapped during empty-directory removal", async t => {
+    const parent = join(directory, "computer-profiles/bot_idle/standard/Cache");
+    file("computer-profiles/bot_idle/standard/Cache/nested/data");
+    const sentinel = file("outside/Cookies", 0, "outside Cookies sentinel");
+    const empty = join(directory, "outside/nested"); mkdirSync(empty);
+    const original = fs.rmdirSync; let swapped = false;
+    const hook = t.mock.method(fs, "rmdirSync", (path: fs.PathLike) => {
+      if (!swapped) { swapped = true; fs.renameSync(parent, `${parent}.saved`); fs.symlinkSync(join(directory, "outside"), parent); }
+      return original(path);
+    });
+    syncBuiltinESMExports();
+    try {
+      await runRetention({ directory });
+      assert.equal(swapped, true); assert.equal(readFileSync(sentinel, "utf8"), "outside Cookies sentinel");
+      assert.equal(existsSync(empty), true, "The outside empty directory must also survive");
+    } finally { hook.mock.restore(); syncBuiltinESMExports(); }
   });
   it("fails closed on malformed events before pruning caches", async () => {
     const path = file("computer-profiles/bot_idle/standard/Cache/data"); file("feed-bot_test.jsonl", 0, '{"at":');

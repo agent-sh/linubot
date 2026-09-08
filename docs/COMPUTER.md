@@ -107,8 +107,12 @@ and live-frame sizes. Set screenshot retention (14 days by default), or choose
 **Free space now**. Cleanup also runs after desktop startup and every six hours.
 Only the named Chromium cache directories in idle profiles are pruned: Cache,
 Code Cache, GPUCache, GrShaderCache, ShaderCache, DawnCache and Service Worker/CacheStorage,
-including their Default equivalents. Cookies, saved logins and other browser
-state stay intact. Running and starting computers are skipped.
+including their Default equivalents. The root-level `component_crx_cache` is
+also eligible: Chromium [places its CRX cache there](https://chromium.googlesource.com/chromium/src/+/08f64abfea00666c4b6f7ceb22e96c71d330cf51/chrome/browser/component_updater/chrome_component_updater_configurator.cc)
+and uses it for [previous update packages](https://chromium.googlesource.com/chromium/src/+/e7e99aa5/components/update_client/crx_cache.h).
+Removing those packages can require downloading them again. Installed models,
+speech engines, Safe Browsing/security databases, cookies, saved logins and other
+browser state stay intact. Running and starting computers are skipped.
 
 Screenshots older than the selected age are removed only when no event within
 that age references them and no unfinished run references them. Older activity
@@ -118,4 +122,14 @@ metadata stops cleanup without deleting files.
 
 For read-only inspection, run
 `LINUBOT_DATA=/path/to/data node --experimental-strip-types src/retention.ts --dry-run`.
-It reports file counts and logical bytes that would be freed without changing data.
+It reports file counts and logical bytes that would be freed without changing data,
+even when the configured data directory does not exist.
+
+On Linux, retention pins directory handles and opens each path component with
+`O_DIRECTORY | O_NOFOLLOW`. It uses `/proc/self/fd/<parent>/<basename>` for child
+lookups and deletion, so renaming a directory or replacing its name with a
+symlink cannot redirect cleanup outside the opened cache. Handles stay open until
+their operations finish and close on errors. This relies on Linux procfs; there
+is no pathname-based fallback. Symlinks in the configured data path are rejected.
+See [Linux directory-handle semantics](https://man7.org/linux/man-pages/man2/open.2.html)
+and [procfs file descriptors](https://man7.org/linux/man-pages/man5/proc_pid_fd.5.html).
