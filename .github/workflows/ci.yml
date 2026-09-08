@@ -65,4 +65,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+      - name: Verify release SDK prerequisites
+        run: '"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-37.0" "build-tools;36.0.0"'
       - run: android/gradlew -p android :app:testDebugUnitTest :app:assembleRelease :app:lintRelease

@@ -39,7 +39,7 @@ jobs:
             openbox xdotool x11-utils ffmpeg xclip bubblewrap libxkbcommon-x11-0 \
             curl unzip dpkg-dev
           python3 -m pip install --user --break-system-packages uv==0.11.7
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37' 'build-tools;36.0.0'
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37.0' 'build-tools;36.0.0'
       - run: npm ci
       - name: Build, verify and publish the existing tag
         env:
