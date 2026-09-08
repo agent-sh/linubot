@@ -1,7 +1,7 @@
 {
   "name": "linubot",
   "private": true,
-  "version": "2.12.1",
+  "version": "2.12.2",
   "description": "A self-hosted Linux team of AI coworkers with web access and owned computer workspaces",
   "type": "module",
   "scripts": {
@@ -12,7 +12,7 @@
     "start": "npm run build && electron .",
     "build": "tsc -p tsconfig.build.json",
     "desktop": "npm run build && electron .",
-    "package:linux": "npm run build && node scripts/prepare-workspace.mjs && electron-builder --linux deb dir",
+    "package:linux": "npm run build && node scripts/prepare-workspace.mjs && electron-builder --linux deb dir --publish never",
     "test:desktop": "npm run build && playwright test",
     "test:workspace": "npm run build && node scripts/workspace-smoke.mjs",
     "install:local": "node scripts/install-local.mjs",
