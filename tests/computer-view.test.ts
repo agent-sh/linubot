@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { get as httpGet } from "node:http";
 import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
@@ -357,6 +358,40 @@ describe("embedded owned computer control", () => {
 });
 
 describe("embedded computer HTTP control", () => {
+  it("keeps computer and demonstration routes behind authentication and the update freeze", async () => {
+    const { computer, view, calls } = await fixture();
+    const app = createApp({ computer, workspaceView: view, scheduler: false, accessToken: "fixture-desktop-access" });
+    await new Promise<void>((resolve) => app.server.listen(0, "127.0.0.1", resolve)); cleanup.push(() => app.close());
+    const base = `http://127.0.0.1:${(app.server.address() as AddressInfo).port}/api`;
+    const headers = { "x-linubot-token": "fixture-desktop-access", "content-type": "application/json" };
+    for (const path of ["/computer/views", "/demos"]) {
+      assert.equal((await fetch(base + path)).status, 403);
+      const untrustedHost = await new Promise<number | undefined>((resolve, reject) => {
+        httpGet(base + path, { headers: { ...headers, host: "untrusted.example" } }, (response) => {
+          response.resume(); response.once("end", () => resolve(response.statusCode));
+        }).on("error", reject);
+      });
+      assert.equal(untrustedHost, 403);
+      assert.equal((await fetch(base + path, { headers: { ...headers, origin: "https://untrusted.example" } })).status, 403);
+      assert.equal((await fetch(base + path, { headers })).status, 200);
+    }
+    const thaw = app.freezeForUpdate();
+    calls.length = 0;
+    try {
+      for (const path of ["/computer/start", "/demos"]) {
+        const response = await fetch(base + path, { method: "POST", headers, body: JSON.stringify({ purpose: "Blocked", acknowledge: true }) });
+        assert.equal(response.status, 503);
+        assert.match((await response.json()).error, /restarting for an update/);
+      }
+      assert.equal(calls.length, 0);
+      assert.equal((await fetch(base + "/computer/views", { headers })).status, 200);
+    } finally { thaw(); }
+    const taken = await fetch(base + "/computer/control", { method: "POST", headers, body: JSON.stringify({ id: ID, action: "take" }) });
+    assert.equal(taken.status, 200);
+    await view.release(ID, (await taken.json()).token);
+    for (const path of ["/computer/unknown", "/demos/unknown/unknown"]) assert.equal((await fetch(base + path, { headers })).status, 404);
+  });
+
   it("protects frame/input endpoints, isolates ownership and never exposes control tokens or typed input in status", async () => {
     const { computer, view, calls } = await fixture();
     await computer.start({ id: OTHER, acknowledge: true, purpose: "Another conversation", scope: "bot:Other" });
