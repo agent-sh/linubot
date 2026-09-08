@@ -153,6 +153,41 @@ describe("Tiyuvta browser callback", () => {
     } finally { await login.close(); }
   });
 
+  it("finishes sign-in and closes all sockets when the browser disconnects during exchange", async () => {
+    let release!: () => void, ready!: () => void, exchangeSignal: AbortSignal | null | undefined, notifications = 0;
+    const started = new Promise<void>((resolve) => { ready = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const login = createTiyuvtaLogin({ connected: () => { notifications++; }, request: async (url, init) => {
+      if (String(url).endsWith("/models")) return fixture(url, init);
+      exchangeSignal = init?.signal; ready(); await gate;
+      return Response.json({ key: "disconnected-browser-key" });
+    } });
+    const flow = await login.begin(), url = callback(flow);
+    url.searchParams.set("code", "one-time-code");
+    const browser = createConnection({ host: "127.0.0.1", port: Number(url.port) });
+    let partial: ReturnType<typeof createConnection> | undefined;
+    try {
+      await once(browser, "connect");
+      browser.write(`GET ${url.pathname}${url.search} HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n`);
+      await started;
+      partial = createConnection({ host: "127.0.0.1", port: Number(url.port) });
+      await once(partial, "connect");
+      await new Promise<void>((resolve, reject) => partial!.write("GET /callback HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Incomplete: ", (error) => error ? reject(error) : resolve()));
+      const disconnected = once(browser, "close"); browser.destroy(); await disconnected;
+      // Let the server observe the closed browser while the exchange is still held.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(login.status(flow.id).state, "exchanging");
+      assert.equal(exchangeSignal?.aborted, false, "browser disconnect must not cancel a valid exchange");
+      release();
+      if (!partial.destroyed) await once(partial, "close", { signal: AbortSignal.timeout(1500) });
+      const state = login.status(flow.id);
+      assert.equal(state.state, "connected"); assert.equal(partial.destroyed, true);
+      assert.equal(getProvider(state.connectionId).apiKey, "disconnected-browser-key");
+      assert.equal(notifications, 1);
+      await assert.rejects(fetch(url));
+    } finally { release?.(); browser.destroy(); partial?.destroy(); await login.close(); }
+  });
+
   it("flushes the successful callback and closes an incomplete-header socket", async () => {
     const login = createTiyuvtaLogin({ request: fixture });
     const flow = await login.begin(), url = callback(flow);

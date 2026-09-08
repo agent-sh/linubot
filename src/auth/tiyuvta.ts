@@ -94,10 +94,17 @@ export function createTiyuvtaLogin(options: { request?: typeof fetch; connected?
             const saved = original ? setProvider({ id: original.id, ...credential }) : setProvider({ newConnection: true, name: "Tiyuvta", kind: "openai-compat", baseUrl: BASE, auth: "bearer", ...credential });
             if (providerStatus(saved.id).ready && !providerConnections().connections.some((p) => p.id !== saved.id && p.ready)) selectProvider(saved.id!);
             entry.connectionId = saved.id; entry.state = "connected"; clearTimeout(entry.timer);
-            res.writeHead(200); res.end(page("Connected to Tiyuvta"), () => {
+            let completed = false;
+            const complete = () => {
+              if (completed) return;
+              completed = true;
               void close(entry);
               try { options.connected?.(saved.id!); } catch { console.error("Could not focus Linubot after sign-in"); }
-            });
+            };
+            // Exchange is complete: flush a live response or dispose of a departed browser.
+            res.once("finish", complete); res.once("close", complete); res.once("error", complete);
+            if (res.destroyed) complete();
+            else { res.writeHead(200); res.end(page("Connected to Tiyuvta")); }
           } catch (error) {
             if (entry.state === "exchanging") { entry.state = "failed"; entry.error = error instanceof InputError ? error.message : "Tiyuvta sign-in could not finish. Try again."; }
             if (!res.destroyed) { res.writeHead(400); res.end(page("Connection was not completed")); }
