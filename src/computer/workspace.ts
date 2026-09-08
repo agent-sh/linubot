@@ -106,6 +106,10 @@ function response(output: string): BackendResponse {
 
 const starting = new Set<string>();
 
+export function workspaceStarting(scope: string, directory: string): boolean {
+  return starting.has(`${join(directory, "computer-workspaces.json")}:${scope}`);
+}
+
 /** Only handles created and persisted by this adapter can be used. No host inventory or raw runner escape hatch. */
 export function createComputer(run: Runner = defaultRunner) {
   const scoped = async (args: string[], id: unknown, options?: CommandOptions): Promise<string> => {
@@ -155,7 +159,7 @@ export function createComputer(run: Runner = defaultRunner) {
       const id = opts.id === undefined ? `linubot-${randomUUID()}` : opts.id;
       if (!validId(id)) throw new InputError("workspace ID must be linubot-<UUID v4>");
       if (opts.scope && ownedWorkspaces().some(entry => entry.scope === opts.scope && entry.state === "running")) throw new InputError("This bot or group already has an open computer. Close it before starting another.", 409);
-      const key = `${ownedPath()}:${id}`, scopeKey = opts.scope ? `${ownedPath()}:${opts.scope}` : key;
+      const key = `${resolve(ownedPath())}:${id}`, scopeKey = opts.scope ? `${resolve(ownedPath())}:${opts.scope}` : key;
       if (opts.scope && starting.has(scopeKey)) throw new InputError("This bot or group already has a computer starting", 409);
       if (starting.has(key) || ownedWorkspaces().some((entry) => entry.id === id)) throw new InputError(`workspace already owned or starting: ${id}`, 409);
       const args = ["workspace", "start", "--ack-hidden-workspace", "--purpose", purpose, "--id", id];

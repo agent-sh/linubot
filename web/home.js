@@ -1,3 +1,4 @@
+import { retentionControls } from "./retention.js";
 import { esc, enc, icon, avatar, date, page } from "./ui.js";
 
 export const previewText = (value = "") => String(value).replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").replace(/[#*_`>]/g, "").replace(/\s+/g, " ").trim();
@@ -58,7 +59,7 @@ export async function renderSessions(ctx) {
   search.oninput = paint; ctx.watchOverview(paint); paint();
 }
 
-export function renderAdvanced(ctx) {
+export async function renderAdvanced(ctx) {
   const notes = ctx.getOverview().proposals.filter((proposal) => proposal.status === "proposed").length;
   const memory = ctx.getOverview().memory;
   const memories = (memory?.counts.memory || 0) + (memory?.counts.user || 0);
@@ -71,5 +72,6 @@ export function renderAdvanced(ctx) {
     ["clock", "Routines", "Set up recurring help and delivery.", "routines", ""],
     ["computer", "Workspaces & demonstrations", "Inspect desktops or show a bot a procedure.", "workspace", ""],
   ];
-  ctx.root.innerHTML = page("Advanced", "Tools and tuning, when you want a closer look.", `<nav class="advanced-list" aria-label="Advanced tools">${sections.map(([symbol, title, text, path, note]) => `<a href="#/${path}">${icon(symbol)}<span><strong>${title}</strong><small>${text}</small></span>${note ? `<span class="learning-note">${esc(note)}</span>` : ""}${icon("arrow")}</a>`).join("")}</nav>`, "", "Your bots / Settings");
+  ctx.root.innerHTML = page("Advanced", "Tools and tuning, when you want a closer look.", `<nav class="advanced-list" aria-label="Advanced tools">${sections.map(([symbol, title, text, path, note]) => `<a href="#/${path}">${icon(symbol)}<span><strong>${title}</strong><small>${text}</small></span>${note ? `<span class="learning-note">${esc(note)}</span>` : ""}${icon("arrow")}</a>`).join("")}</nav><section class="section" data-retention></section>`, "", "Your bots / Settings");
+  await retentionControls(ctx, ctx.root.querySelector("[data-retention]"));
 }

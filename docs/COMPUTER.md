@@ -99,3 +99,23 @@ That separation is not, by itself, a filesystem or network sandbox. Initial
 workspace permission covers normal interaction; executable launches and external
 commitments have additional approval requirements. See [security](../SECURITY.md)
 and [installation prerequisites](INSTALLATION.md#computer-tasks-and-extensions).
+
+## Disk usage
+
+**Advanced > Disk usage** shows browser profile, screenshot, context, artifact
+and live-frame sizes. Set screenshot retention (14 days by default), or choose
+**Free space now**. Cleanup also runs after desktop startup and every six hours.
+Only the named Chromium cache directories in idle profiles are pruned: Cache,
+Code Cache, GPUCache, GrShaderCache, ShaderCache, DawnCache and Service Worker/CacheStorage,
+including their Default equivalents. Cookies, saved logins and other browser
+state stay intact. Running and starting computers are skipped.
+
+Screenshots older than the selected age are removed only when no event within
+that age references them and no unfinished run references them. Older activity
+can therefore show an unavailable screenshot. Live frames older than one hour
+are removed; contexts and artifacts are measured but kept. Unreadable retention
+metadata stops cleanup without deleting files.
+
+For read-only inspection, run
+`LINUBOT_DATA=/path/to/data node --experimental-strip-types src/retention.ts --dry-run`.
+It reports file counts and logical bytes that would be freed without changing data.
