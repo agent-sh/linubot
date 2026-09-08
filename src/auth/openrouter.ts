@@ -17,8 +17,10 @@ export function createOpenRouterLogin(options: { request?: typeof fetch; connect
   async function close(entry: Login) {
     clearTimeout(entry.timer);
     entry.controller.abort();
-    entry.server.closeAllConnections();
-    await new Promise<void>((resolve) => entry.server.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      entry.server.close(() => resolve());
+      entry.server.closeAllConnections();
+    });
   }
   async function cancel(id?: string) {
     if (!active || (id && active.id !== id)) return;
@@ -62,9 +64,10 @@ export function createOpenRouterLogin(options: { request?: typeof fetch; connect
             const credential = { apiKey: data.key, rememberKey: providerStatus().credentialStorage };
             const saved = original ? setProvider({ id: original.id, ...credential }) : setProvider({ newConnection: true, name: "OpenRouter", kind: "openai-compat", baseUrl: BASE, auth: "bearer", model: "", ...credential });
             entry.connectionId = saved.id; entry.state = "connected"; clearTimeout(entry.timer);
-            res.writeHead(200); res.end(page("Connected to OpenRouter"));
-            entry.server.close(); entry.server.closeIdleConnections();
-            try { options.connected?.(saved.id!); } catch { console.error("Could not focus Linubot after sign-in"); }
+            res.writeHead(200); res.end(page("Connected to OpenRouter"), () => {
+              void close(entry);
+              try { options.connected?.(saved.id!); } catch { console.error("Could not focus Linubot after sign-in"); }
+            });
           } catch (error) {
             if (entry.state !== "cancelled") { entry.state = "failed"; entry.error = error instanceof InputError ? error.message : "OpenRouter sign-in could not finish. Try again."; }
             if (!res.destroyed) { res.writeHead(400); res.end(page("Connection was not completed")); }

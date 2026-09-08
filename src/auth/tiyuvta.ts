@@ -9,6 +9,14 @@ import { InputError } from "../errors.ts";
 type State = "waiting" | "exchanging" | "connected" | "cancelled" | "failed";
 interface Login { id: string; verifier: string; state: State; controller: AbortController; server: Server; timer?: NodeJS.Timeout; connectionId?: string; error?: string }
 const BASE = "https://api.tiyuvta.ai/v1";
+function exchangeError(code: unknown): string {
+  switch (code) {
+    case "access_denied": return "Tiyuvta sign-in was declined. Start again to approve the connection.";
+    case "invalid_code": return "This Tiyuvta sign-in code is invalid or has already been used. Start again.";
+    case "expired_code": return "This Tiyuvta sign-in code has expired. Start again.";
+    default: return "Tiyuvta sign-in could not finish. Try again.";
+  }
+}
 const page = (message: string) => `<!doctype html><html><head><meta charset="utf-8"><title>Linubot connection</title></head><body><h1>${message}</h1><p>You can return to Linubot and close this tab.</p></body></html>`;
 
 export function createTiyuvtaLogin(options: { request?: typeof fetch; connected?: (id: string) => void } = {}) {
@@ -18,8 +26,10 @@ export function createTiyuvtaLogin(options: { request?: typeof fetch; connected?
   async function close(entry: Login) {
     clearTimeout(entry.timer);
     entry.controller.abort();
-    entry.server.closeAllConnections();
-    await new Promise<void>((resolve) => entry.server.close(() => resolve()));
+    await new Promise<void>((resolve) => {
+      entry.server.close(() => resolve());
+      entry.server.closeAllConnections();
+    });
   }
   async function cancel(id?: string) {
     if (!active || (id && active.id !== id)) return;
@@ -53,8 +63,8 @@ export function createTiyuvtaLogin(options: { request?: typeof fetch; connected?
           try {
             const response = await request("https://inference.tiyuvta.ai/api/connect/exchange", { method: "POST", redirect: "error", signal: AbortSignal.any([entry.controller.signal, AbortSignal.timeout(20000)]), headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, code_verifier: verifier }) });
             if (!response.ok) {
-              const failure = await readProviderJson(response) as { message?: unknown };
-              throw new InputError(typeof failure?.message === "string" ? failure.message : `Tiyuvta sign-in exchange returned HTTP ${response.status}`, 502);
+              const failure = await readProviderJson(response) as { error?: unknown };
+              throw new InputError(exchangeError(failure?.error), 502);
             }
             const data = await readProviderJson(response) as { key?: string };
             if (!data || typeof data.key !== "string" || !data.key || data.key.length > 10000 || /[\r\n]/.test(data.key)) throw new Error("Tiyuvta returned an invalid credential");
@@ -75,9 +85,10 @@ export function createTiyuvtaLogin(options: { request?: typeof fetch; connected?
             const saved = original ? setProvider({ id: original.id, ...credential }) : setProvider({ newConnection: true, name: "Tiyuvta", kind: "openai-compat", baseUrl: BASE, auth: "bearer", ...credential });
             if (providerStatus(saved.id).ready && !providerConnections().connections.some((p) => p.id !== saved.id && p.ready)) selectProvider(saved.id!);
             entry.connectionId = saved.id; entry.state = "connected"; clearTimeout(entry.timer);
-            res.writeHead(200); res.end(page("Connected to Tiyuvta"));
-            entry.server.close(); entry.server.closeIdleConnections();
-            try { options.connected?.(saved.id!); } catch { console.error("Could not focus Linubot after sign-in"); }
+            res.writeHead(200); res.end(page("Connected to Tiyuvta"), () => {
+              void close(entry);
+              try { options.connected?.(saved.id!); } catch { console.error("Could not focus Linubot after sign-in"); }
+            });
           } catch (error) {
             if (entry.state === "exchanging") { entry.state = "failed"; entry.error = error instanceof InputError ? error.message : "Tiyuvta sign-in could not finish. Try again."; }
             if (!res.destroyed) { res.writeHead(400); res.end(page("Connection was not completed")); }

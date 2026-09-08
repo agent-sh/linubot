@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createConnection } from "node:net";
+import { once } from "node:events";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -107,14 +109,53 @@ describe("Tiyuvta browser callback", () => {
     } finally { await login.close(); }
   });
 
-  it("surfaces the console exchange message verbatim", async () => {
-    const message = "Connect is not available for this account. Contact support.";
-    const login = createTiyuvtaLogin({ request: async () => Response.json({ error: "access_denied", message }, { status: 403 }) });
+  for (const [code, expected] of [
+    ["access_denied", "Tiyuvta sign-in was declined. Start again to approve the connection."],
+    ["invalid_code", "This Tiyuvta sign-in code is invalid or has already been used. Start again."],
+    ["expired_code", "This Tiyuvta sign-in code has expired. Start again."],
+    ["unknown_fixture_secret_key", "Tiyuvta sign-in could not finish. Try again."],
+    ["constructor", "Tiyuvta sign-in could not finish. Try again."],
+    [{ message: "fixture-secret-key" }, "Tiyuvta sign-in could not finish. Try again."],
+    [undefined, "Tiyuvta sign-in could not finish. Try again."],
+  ] as const) {
+    it(`maps exchange error ${JSON.stringify(code)} to safe local copy`, async () => {
+      const login = createTiyuvtaLogin({ request: async () => Response.json({ error: code, message: "Could not save key fixture-secret-key", key: "fixture-secret-key" }, { status: 502 }) });
+      try {
+        const flow = await login.begin(), response = await fetch(callback(flow));
+        assert.equal(response.status, 400);
+        const state = login.status(flow.id);
+        assert.equal(state.state, "failed"); assert.equal(state.error, expected);
+        assert.doesNotMatch(JSON.stringify(state) + await response.text(), /fixture.secret.key|Could not save key/);
+        assert.equal(providerConnections().connections.length, 1);
+      } finally { await login.close(); }
+    });
+  }
+
+  it("keeps malformed exchange bodies out of status and callback output", async () => {
+    const login = createTiyuvtaLogin({ request: async () => new Response('Could not save key fixture-secret-key', { status: 502 }) });
     try {
-      const flow = await login.begin(); assert.equal((await fetch(callback(flow))).status, 400);
-      assert.equal(login.status(flow.id).state, "failed"); assert.equal(login.status(flow.id).error, message);
-      assert.equal(providerConnections().connections.length, 1);
+      const flow = await login.begin(), response = await fetch(callback(flow));
+      assert.equal(response.status, 400);
+      assert.equal(login.status(flow.id).error, "Tiyuvta sign-in could not finish. Try again.");
+      assert.doesNotMatch(JSON.stringify(login.status(flow.id)) + await response.text(), /fixture-secret-key/);
     } finally { await login.close(); }
+  });
+
+  it("flushes the successful callback and closes an incomplete-header socket", async () => {
+    const login = createTiyuvtaLogin({ request: fixture });
+    const flow = await login.begin(), url = callback(flow);
+    const socket = createConnection({ host: "127.0.0.1", port: Number(url.port) });
+    try {
+      await once(socket, "connect");
+      await new Promise<void>((resolve, reject) => socket.write("GET /callback HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Incomplete: ", (error) => error ? reject(error) : resolve()));
+      const response = await fetch(url);
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /Connected to Tiyuvta<\/h1>.*<\/html>$/);
+      assert.equal(login.status(flow.id).state, "connected");
+      if (!socket.destroyed) await once(socket, "close", { signal: AbortSignal.timeout(1500) });
+      assert.equal(socket.destroyed, true);
+      await assert.rejects(fetch(url));
+    } finally { socket.destroy(); await login.close(); }
   });
 
   it("expires after ten minutes", async (t) => {

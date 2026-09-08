@@ -5,6 +5,8 @@ import type { Server, RequestListener } from "node:http";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createConnection } from "node:net";
+import { once } from "node:events";
 import { createHash } from "node:crypto";
 import { writeJson } from "../src/store.ts";
 import { chatResponse, providerBase } from "../src/auth/providers.ts";
@@ -184,6 +186,24 @@ describe("provider connections and catalogs", () => {
 });
 
 describe("OpenRouter browser callback", () => {
+  it("flushes the successful callback and closes an incomplete-header socket", async () => {
+    const login = createOpenRouterLogin({ request: async () => Response.json({ key: "callback-private-key" }) });
+    const flow = await login.begin(), url = new URL(new URL(flow.authorizationUrl).searchParams.get("callback_url")!);
+    url.searchParams.set("code", "one-time-code");
+    const socket = createConnection({ host: "127.0.0.1", port: Number(url.port) });
+    try {
+      await once(socket, "connect");
+      await new Promise<void>((resolve, reject) => socket.write("GET /callback HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Incomplete: ", (error) => error ? reject(error) : resolve()));
+      const response = await fetch(url);
+      assert.equal(response.status, 200);
+      assert.match(await response.text(), /Connected to OpenRouter<\/h1>.*<\/html>$/);
+      assert.equal(login.status(flow.id).state, "connected");
+      if (!socket.destroyed) await once(socket, "close", { signal: AbortSignal.timeout(1500) });
+      assert.equal(socket.destroyed, true);
+      await assert.rejects(fetch(url));
+    } finally { socket.destroy(); await login.close(); }
+  });
+
   it("validates state and PKCE, consumes the callback once, and stores no key in browser status", async () => {
     let exchanges = 0, release!: () => void, ready!: () => void;
     const started = new Promise<void>((resolve) => { ready = resolve; });
