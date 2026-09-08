@@ -29,6 +29,32 @@ export function prepareReleaseDist() {
   }
 }
 
+// Inspect archive-restored modes, not whether the builder can read its own files.
+export function verifyPayloadModes(root) {
+  const visit = (path) => {
+    const stat = lstatSync(path);
+    if (stat.isSymbolicLink()) return;
+    const required = stat.isDirectory() ? 0o005 : 0o004;
+    requireThat((stat.mode & required) === required, `Package permissions deny ordinary users access: ${path} (mode ${(stat.mode & 0o7777).toString(8)})`);
+    if (stat.isDirectory()) for (const name of readdirSync(path)) visit(join(path, name));
+  };
+  visit(root);
+}
+
+// Preserve Markdown whitespace and blank lines. Only supply a missing final LF.
+export const canonicalNotes = (bytes) => bytes.at(-1) === 10 ? bytes : Buffer.concat([bytes, Buffer.from('\n')]);
+export function readTagNotes(tag) {
+  const object = run('git', ['cat-file', 'tag', tag], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const separator = object.indexOf(Buffer.from('\n\n'));
+  requireThat(separator !== -1, `Annotated tag ${tag} has no message separator.`);
+  return object.subarray(separator + 2);
+}
+export function ensureReleaseTag(tag, head, notes, tagged) {
+  const bytes = canonicalNotes(readFileSync(notes));
+  if (!tagged) run('git', ['tag', '-a', tag, head, '--cleanup=verbatim', '-F', '-'], { input: bytes, stdio: ['pipe', 'inherit', 'inherit'] });
+  else requireThat(canonicalNotes(readTagNotes(tag)).equals(bytes), 'Existing tag notes differ from the requested release notes.');
+}
+
 export function verifyArtifacts(version, temporary) {
   const names = assetNames(version);
   const appAsar = 'release/linux-unpacked/resources/app.asar';
@@ -42,6 +68,7 @@ export function verifyArtifacts(version, temporary) {
   const deb = join(temporary, 'deb'), tar = join(temporary, 'tar'); mkdirSync(tar);
   run('dpkg-deb', ['-x', join('release', names[0]), deb]);
   run('tar', ['-xzf', join('release', names[1]), '-C', tar]);
+  for (const root of [deb, tar, 'release/linux-unpacked']) verifyPayloadModes(root);
   const debAsars = filesUnder(deb).filter((path) => path.endsWith('/resources/app.asar'));
   requireThat(debAsars.length === 1, 'Debian package must contain exactly one application ASAR.');
   const debRoot = dirname(dirname(debAsars[0]));
@@ -93,6 +120,7 @@ export function main(args = process.argv.slice(2)) {
       notes = resolve(args[++i]);
     } else if (!['--dry-run', '--resume', '--github-release', '--build-only'].includes(arg)) throw new Error(`Unknown option: ${arg}`);
   }
+  const previousUmask = process.umask(0o022);
   let temporary;
   for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
     process.once(signal, () => {
@@ -141,7 +169,7 @@ export function main(args = process.argv.slice(2)) {
     if (hosted) {
       temporary = mkdtempSync(join(tmpdir(), 'linubot-release-'));
       notes = join(temporary, 'notes.md');
-      writeFileSync(notes, git('for-each-ref', '--format=%(contents)', `refs/tags/${tag}`) + '\n');
+      writeFileSync(notes, canonicalNotes(readTagNotes(tag)));
     }
     requireThat(notes || dryRun || buildOnly, '--notes <path> is required for publication.');
     if (notes) requireThat(existsSync(notes) && statSync(notes).isFile() && readFileSync(notes, 'utf8').trim(), '--notes must name a nonempty readable file.');
@@ -177,7 +205,7 @@ export function main(args = process.argv.slice(2)) {
       log('6/6 No local installation changes. Dry run passed.');
     } else {
       temporary ||= mkdtempSync(join(tmpdir(), 'linubot-release-'));
-      const notesHash = notes ? fileHash(notes) : undefined;
+      const notesHash = notes ? hash(canonicalNotes(readFileSync(notes))) : undefined;
       if (resume) {
         requireThat(receipt.notesHash === notesHash, 'Release notes differ from the verified receipt.');
         requireThat(JSON.stringify(receipt.assets?.map((asset) => asset.name)) === JSON.stringify(names), 'Release receipt asset list does not match this version.');
@@ -230,8 +258,7 @@ export function main(args = process.argv.slice(2)) {
       requireThat(git('rev-parse', 'HEAD') === head && !git('status', '--porcelain'), 'The working tree changed during validation.');
       if (!hosted) {
         requireThat(git('rev-parse', 'origin/main') === head, 'origin/main changed during validation.');
-        if (!tagged) run('git', ['tag', '-a', tag, head, '-F', notes]);
-        else requireThat(git('for-each-ref', '--format=%(contents)', `refs/tags/${tag}`) === readFileSync(notes, 'utf8').trim(), 'Existing tag notes differ from the requested release notes.');
+        ensureReleaseTag(tag, head, notes, tagged);
         run('git', ['push', 'origin', `refs/tags/${tag}:refs/tags/${tag}`]);
         log('6/6 Tag request pushed. Only the tag workflow publishes. If already pushed, rerun its failed Actions run; pushing an unchanged tag creates no new event.');
         console.log(`https://github.com/${repository}/actions/workflows/release.yml`);
@@ -271,6 +298,7 @@ export function main(args = process.argv.slice(2)) {
     console.error(`[release] FAILED: ${error.message}`);
     process.exitCode = 1;
   } finally {
+    process.umask(previousUmask);
     if (temporary) rmSync(temporary, { recursive: true, force: true });
   }
 
