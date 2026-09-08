@@ -47,3 +47,22 @@ export function createUpdates(options: { version?: string; check?: () => Promise
   } };
 }
 export type Updates = ReturnType<typeof createUpdates>;
+
+// Activation must be handed off before quitting: restarting the user unit can
+// terminate this process. The desktop supplies a helper outside the app's unit.
+export function managedUpdateInstaller(hooks: {
+  hasActiveWork: () => boolean;
+  stage: (release: ReleaseUpdate) => Promise<void>;
+  freeze: () => () => void;
+  activateAfterExit: (release: ReleaseUpdate) => Promise<void>;
+  quit: () => void;
+}): (release: ReleaseUpdate) => Promise<void> {
+  return async (release) => {
+    if (hooks.hasActiveWork()) throw new Error("Finish active tasks before upgrading Linubot.");
+    await hooks.stage(release);
+    if (hooks.hasActiveWork()) throw new Error("The update is downloaded. Finish active tasks, then click Upgrade again to restart.");
+    const resume = hooks.freeze();
+    try { await hooks.activateAfterExit(release); hooks.quit(); }
+    catch { resume(); throw new Error("The staged update could not be activated. Restart Linubot or retry the installer."); }
+  };
+}

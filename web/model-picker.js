@@ -1,9 +1,10 @@
 import { api, post, esc, icon } from "./ui.js";
 
-export function modelPicker(root, { model = "", defaultLabel = "", getCatalog, signal } = {}) {
+export function modelPicker(root, { model = "", defaultLabel = "", getCatalog, signal, preselect } = {}) {
   let selected = model, models = [], generation = 0, request, disabled = false;
-  root.innerHTML = `<label>Model<select name="modelChoice" required></select></label><label data-custom-model hidden>Custom model ID<input name="customModel" maxlength="200" autocomplete="off" placeholder="Enter the exact model ID"></label><input type="hidden" name="model"><div class="model-catalog-actions"><button type="button" class="small" data-load-models>${icon("refresh")} Refresh models</button><span class="field-hint" data-model-status role="status"></span></div>`;
+  root.innerHTML = `<label>Model<select name="modelChoice" required></select></label><label data-custom-model hidden>Custom model ID<input name="customModel" maxlength="200" autocomplete="off" placeholder="Enter the exact model ID"></label><input type="hidden" name="model"><p class="field-hint" data-model-preselected hidden></p><div class="model-catalog-actions"><button type="button" class="small" data-load-models>${icon("refresh")} Refresh models</button><span class="field-hint" data-model-status role="status"></span></div>`;
   const choice = root.querySelector("select"), custom = root.querySelector("[name=customModel]"), hidden = root.querySelector("[name=model]"), button = root.querySelector("button"), status = root.querySelector("[data-model-status]");
+  const hint = root.querySelector("[data-model-preselected]");
   function sync() {
     const manual = choice.value === "__custom__";
     root.querySelector("[data-custom-model]").hidden = !manual;
@@ -18,10 +19,10 @@ export function modelPicker(root, { model = "", defaultLabel = "", getCatalog, s
     choice.value = selected || (defaultLabel ? "default" : ""); choice.disabled = disabled; button.disabled = disabled;
     sync();
   }
-  choice.onchange = () => { if (choice.value === "__custom__") custom.value = selected === "default" ? "" : selected; sync(); if (choice.value === "__custom__") custom.focus(); };
+  choice.onchange = () => { hint.hidden = true; if (choice.value === "__custom__") custom.value = selected === "default" ? "" : selected; sync(); if (choice.value === "__custom__") custom.focus(); };
   custom.oninput = sync;
   function reset(nextModel = "", label = defaultLabel, isDisabled = false) {
-    generation++; request?.abort(); selected = nextModel; defaultLabel = label; disabled = isDisabled; models = []; status.textContent = ""; paint();
+    generation++; request?.abort(); hint.hidden = true; selected = nextModel; defaultLabel = label; disabled = isDisabled; models = []; status.textContent = ""; paint();
   }
   async function load() {
     if (disabled || signal?.aborted) return;
@@ -30,7 +31,12 @@ export function modelPicker(root, { model = "", defaultLabel = "", getCatalog, s
     try {
       const catalog = await getCatalog(AbortSignal.any([request.signal, ...(signal ? [signal] : [])]));
       if (epoch !== generation || signal?.aborted) return;
-      models = catalog.models; paint();
+      models = catalog.models;
+      if (!selected && choice.value !== "__custom__") {
+        const suggestion = preselect?.(models);
+        if (suggestion?.model) { selected = suggestion.model; hint.textContent = suggestion.hint; hint.hidden = false; }
+      }
+      paint();
       status.textContent = catalog.supported === false ? catalog.message : `${models.length} models from this endpoint${catalog.truncated ? " (list limited)" : ""}.`;
     } catch (error) {
       if (epoch === generation && !signal?.aborted && error.name !== "AbortError") status.textContent = `${error.message} Custom model IDs are available.`;

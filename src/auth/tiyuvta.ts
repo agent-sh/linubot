@@ -1,16 +1,34 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import { getProvider, providerStatus, setProvider } from "./store.ts";
+import { getProvider, providerStatus, setProvider, providerConnections, selectProvider } from "./store.ts";
 import { readProviderJson, providerBase } from "./providers.ts";
+import { listProviderModels, preselectCatalogModel } from "./catalog.ts";
 import { InputError } from "../errors.ts";
 
 type State = "waiting" | "exchanging" | "connected" | "cancelled" | "failed";
 interface Login { id: string; verifier: string; state: State; controller: AbortController; server: Server; timer?: NodeJS.Timeout; connectionId?: string; error?: string }
-const BASE = "https://openrouter.ai/api/v1";
+const BASE = "https://api.tiyuvta.ai/v1";
+function exchangeError(code: unknown): string {
+  switch (code) {
+    case "invalid_grant": return "This Tiyuvta sign-in code is invalid, expired, or already used. Start sign-in again.";
+    case "rate_limited": return "Too many Tiyuvta sign-in attempts. Wait a minute, then start sign-in again.";
+    case "signup_abuse_blocked": return "Tiyuvta has blocked this account. Contact Tiyuvta support.";
+    case "signup_abuse_review": return "Your Tiyuvta account needs an access review. Contact Tiyuvta support.";
+    case "key_creation_rate_limited": return "Too many Tiyuvta key requests. Wait a minute, then start sign-in again.";
+    case "key_active_limit": return "Your Tiyuvta account has reached its active key limit. Revoke an unused key in Tiyuvta, then start sign-in again.";
+    case "key_lifetime_limit": return "Your Tiyuvta account has reached its lifetime key limit. Contact Tiyuvta support.";
+    case "account_suspended": return "Your Tiyuvta account is suspended. Contact Tiyuvta support to resolve it.";
+    case "free_allowance_exhausted": return "Your included Tiyuvta requests are used up. Add credit in Tiyuvta, then start sign-in again.";
+    case "engine_revoke_partial": return "Tiyuvta could not complete key creation safely. Contact Tiyuvta support before trying again.";
+    case "engine_origin_unreachable": return "Tiyuvta key creation is temporarily unavailable. Wait a moment, then start sign-in again.";
+    case "billing_not_ready": return "Tiyuvta key creation is temporarily unavailable. Wait a moment, then start sign-in again.";
+    default: return "Tiyuvta sign-in could not finish. Try again.";
+  }
+}
 const page = (message: string) => `<!doctype html><html><head><meta charset="utf-8"><title>Linubot connection</title></head><body><h1>${message}</h1><p>You can return to Linubot and close this tab.</p></body></html>`;
 
-export function createOpenRouterLogin(options: { request?: typeof fetch; connected?: (id: string) => void } = {}) {
+export function createTiyuvtaLogin(options: { request?: typeof fetch; connected?: (id: string) => void } = {}) {
   const request = options.request ?? fetch;
   let active: Login | undefined;
   let starting: Promise<void> = Promise.resolve(), closed = false;
@@ -33,7 +51,7 @@ export function createOpenRouterLogin(options: { request?: typeof fetch; connect
       if (closed) throw new InputError("Sign-in service is stopping", 503);
       await cancel();
       const original = connectionId ? getProvider(connectionId) : undefined;
-      if (original && (providerBase(original.kind, original.baseUrl) !== BASE || !["openai-compat", "responses"].includes(original.kind))) throw new InputError("Choose an OpenRouter connection for browser sign-in");
+      if (original && (providerBase(original.kind, original.baseUrl) !== BASE || !["openai-compat", "responses"].includes(original.kind) || original.auth !== "bearer")) throw new InputError("Choose a Tiyuvta connection for browser sign-in");
       const id = randomBytes(32).toString("base64url"), verifier = randomBytes(32).toString("base64url");
       const entry: Login = { id, verifier, state: "waiting", controller: new AbortController(), server: createServer() };
       active = entry;
@@ -42,7 +60,7 @@ export function createOpenRouterLogin(options: { request?: typeof fetch; connect
         res.setHeader("Cache-Control", "no-store");
         res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
         let url: URL;
-        try { url = new URL(req.url || "/", "http://localhost"); }
+        try { url = new URL(req.url || "/", "http://127.0.0.1"); }
         catch { res.writeHead(400); res.end(page("Invalid connection callback")); return; }
         const state = url.searchParams.get("state") || "";
         if (req.method !== "GET" || url.pathname !== "/callback" || Buffer.byteLength(state) !== Buffer.byteLength(id) || !timingSafeEqual(Buffer.from(state), Buffer.from(id))) { res.writeHead(400); res.end(page("Invalid connection callback")); return; }
@@ -52,17 +70,29 @@ export function createOpenRouterLogin(options: { request?: typeof fetch; connect
         entry.state = "exchanging";
         void (async () => {
           try {
-            const response = await request(`${BASE}/auth/keys`, { method: "POST", redirect: "error", signal: AbortSignal.any([entry.controller.signal, AbortSignal.timeout(20000)]), headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, code_verifier: verifier, code_challenge_method: "S256" }) });
-            if (!response.ok) { await response.body?.cancel(); throw new Error(`OpenRouter sign-in exchange returned HTTP ${response.status}`); }
+            const response = await request("https://inference.tiyuvta.ai/api/connect/exchange", { method: "POST", redirect: "error", signal: AbortSignal.any([entry.controller.signal, AbortSignal.timeout(20000)]), headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code, code_verifier: verifier }) });
+            if (!response.ok) {
+              const failure = await readProviderJson(response) as { error?: unknown };
+              throw new InputError(exchangeError(failure?.error), 502);
+            }
             const data = await readProviderJson(response) as { key?: string };
-            if (!data || typeof data.key !== "string" || !data.key || data.key.length > 10000 || /[\r\n]/.test(data.key)) throw new Error("OpenRouter returned an invalid credential");
+            if (!data || typeof data.key !== "string" || !data.key || data.key.length > 10000 || /[\r\n]/.test(data.key)) throw new Error("Tiyuvta returned an invalid credential");
             if (active !== entry || entry.controller.signal.aborted) throw new Error("Sign-in was cancelled");
+            let model = "";
+            try {
+              const catalog = await listProviderModels({ kind: "openai-compat", baseUrl: BASE, auth: "none", apiKey: "", model: "" }, entry.controller.signal, request);
+              model = preselectCatalogModel(catalog.models);
+            } catch { /* A key can be saved even when the public catalog is unavailable. */ }
+            if (active !== entry || entry.controller.signal.aborted) throw new Error("Sign-in was cancelled");
+            let currentModel = "";
             if (original) {
               const current = getProvider(original.id);
-              if (current.kind !== original.kind || current.baseUrl !== original.baseUrl || current.auth !== original.auth) throw new Error("This connection changed during sign-in. Start again.");
+              if (current.kind !== original.kind || current.baseUrl !== original.baseUrl || current.auth !== original.auth) throw new InputError("This connection changed during sign-in. Start again.");
+              currentModel = current.model === "default" ? "" : current.model;
             }
-            const credential = { apiKey: data.key, rememberKey: providerStatus().credentialStorage };
-            const saved = original ? setProvider({ id: original.id, ...credential }) : setProvider({ newConnection: true, name: "OpenRouter", kind: "openai-compat", baseUrl: BASE, auth: "bearer", model: "", ...credential });
+            const credential = { apiKey: data.key, rememberKey: providerStatus().credentialStorage, model: currentModel || model };
+            const saved = original ? setProvider({ id: original.id, ...credential }) : setProvider({ newConnection: true, name: "Tiyuvta", kind: "openai-compat", baseUrl: BASE, auth: "bearer", ...credential });
+            if (providerStatus(saved.id).ready && !providerConnections().connections.some((p) => p.id !== saved.id && p.ready)) selectProvider(saved.id!);
             entry.connectionId = saved.id; entry.state = "connected"; clearTimeout(entry.timer);
             let completed = false;
             const complete = () => {
@@ -74,9 +104,9 @@ export function createOpenRouterLogin(options: { request?: typeof fetch; connect
             // Exchange is complete: flush a live response or dispose of a departed browser.
             res.once("finish", complete); res.once("close", complete); res.once("error", complete);
             if (res.destroyed) complete();
-            else { res.writeHead(200); res.end(page("Connected to OpenRouter")); }
+            else { res.writeHead(200); res.end(page("Connected to Tiyuvta")); }
           } catch (error) {
-            if (entry.state !== "cancelled") { entry.state = "failed"; entry.error = error instanceof InputError ? error.message : "OpenRouter sign-in could not finish. Try again."; }
+            if (entry.state === "exchanging") { entry.state = "failed"; entry.error = error instanceof InputError ? error.message : "Tiyuvta sign-in could not finish. Try again."; }
             if (!res.destroyed) { res.writeHead(400); res.end(page("Connection was not completed")); }
             void close(entry);
           }
@@ -85,9 +115,11 @@ export function createOpenRouterLogin(options: { request?: typeof fetch; connect
       await new Promise<void>((resolve, reject) => { entry.server.once("error", reject); entry.server.listen(0, "127.0.0.1", resolve); });
       const address = entry.server.address();
       if (!address || typeof address === "string") throw new Error("Could not open the login callback");
-      const callback = new URL(`http://localhost:${address.port}/callback`); callback.searchParams.set("state", id);
-      const authorize = new URL("https://openrouter.ai/auth");
+      const callback = new URL(`http://127.0.0.1:${address.port}/callback`);
+      const authorize = new URL("https://inference.tiyuvta.ai/app/connect");
+      authorize.searchParams.set("app", "linubot");
       authorize.searchParams.set("callback_url", callback.href);
+      authorize.searchParams.set("state", id);
       authorize.searchParams.set("code_challenge", createHash("sha256").update(verifier).digest("base64url"));
       authorize.searchParams.set("code_challenge_method", "S256");
       entry.timer = setTimeout(() => { if (entry.state === "waiting" || entry.state === "exchanging") { entry.state = "failed"; entry.error = "Sign-in expired. Start again."; void close(entry); } }, 10 * 60_000);

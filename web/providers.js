@@ -25,10 +25,11 @@ export async function providerSettings(ctx, main) {
   const roster = document.createElement("section"); roster.className = "provider-roster";
   roster.innerHTML = '<h2>Your providers</h2><p class="field-hint">All ready connections stay available at the same time. Choose a provider for each bot; the app default is for bots that follow it.</p><div data-provider-roster></div>';
   main.querySelector(".provider-connections").prepend(roster);
+  let featuredRoot;
   if (featured) {
     const card = document.createElement("section"); card.className = "provider-featured";
-    card.innerHTML = `<h2>${esc(featured.name)}</h2><p>Tiyuvta is Linubot's own hosted inference. OpenAI-compatible, pay per use, new accounts start with free credit.</p><div class="actions"><button type="button" class="primary" data-connect-featured>Connect ${esc(featured.name)}</button><a href="https://inference.tiyuvta.ai/login?next=/app/keys" target="_blank" rel="noopener noreferrer">Get an API key</a></div>`;
-    roster.before(card);
+    card.innerHTML = `<h2>${esc(featured.name)}</h2><p>Tiyuvta is Linubot's own hosted inference. OpenAI-compatible, pay per use, new accounts start with free credit.</p><div class="actions"><button type="button" class="primary" data-browser-login>Connect in browser</button><button type="button" data-connect-featured>Paste a key instead</button><button type="button" data-cancel-login hidden>Cancel sign-in</button><a href="https://inference.tiyuvta.ai/login?next=/app/keys" target="_blank" rel="noopener noreferrer">Get an API key</a></div><div data-feedback hidden></div><div data-login-link></div>`;
+    roster.before(card); featuredRoot = card;
     card.querySelector("[data-connect-featured]").onclick = () => newConnection(featured);
   }
   const browserRoot = document.createElement("section"); browserRoot.className = "section browser-connect";
@@ -46,11 +47,12 @@ export async function providerSettings(ctx, main) {
     show(updated); feedback(form, "Connected. Choose a model below.", "success"); ctx.changed();
   });
   const controller = new AbortController(); ctx.onCleanup(() => controller.abort());
-  let login, loginTimer;
+  let login, loginTimer, loginEpoch = 0;
   async function cancelLogin() {
-    const prior = login; login = undefined; clearTimeout(loginTimer);
-    browserRoot.querySelector("[data-cancel-login]").hidden = true;
-    if (prior) await post("/api/oauth/openrouter/cancel", { id: prior.id }).catch(() => { /* App shutdown also closes the callback listener. */ });
+    const epoch = ++loginEpoch, prior = login; login = undefined; clearTimeout(loginTimer);
+    if (prior) { prior.root.querySelector("[data-cancel-login]").hidden = true; prior.root.querySelector("[data-login-link]").innerHTML = ""; }
+    if (prior) await post(`/api/oauth/${prior.provider}/cancel`, { id: prior.id }).catch(() => { /* App shutdown also closes the callback listener. */ });
+    return epoch;
   }
   ctx.onCleanup(() => { void cancelLogin(); });
   let picker;
@@ -78,7 +80,11 @@ export async function providerSettings(ctx, main) {
     remove.disabled = isNew || saved.id === connections.activeId;
   }
   picker = modelPicker(main.querySelector("[data-provider-model]"), { model: saved.model, signal: controller.signal,
-    getCatalog: (signal) => post("/api/provider/models", draft(), { signal, timeout: 25000 }) });
+    getCatalog: (signal) => post("/api/provider/models", draft(), { signal, timeout: 25000 }),
+    preselect: (models) => publicCatalog() ? { model: models.find((item) => !/embed|rerank/i.test(item.id))?.id, hint: "Preselected from the Tiyuvta catalog. Change it any time." } : undefined });
+  function publicCatalog() {
+    return presets.some((p) => p.id === form.elements.preset.value && p.publicCatalog && p.kind === form.elements.kind.value && p.baseUrl.replace(/\/+$/, "") === form.elements.baseUrl.value.replace(/\/+$/, ""));
+  }
   function connectionOptions() {
     roster.querySelector("[data-provider-roster]").innerHTML = connections.connections.map((p) => `<button type="button" class="provider-row${!isNew && p.id === saved.id ? " selected" : ""}" data-edit-provider="${esc(p.id)}"><span><strong>${esc(p.name)}</strong><small>${esc(p.model || "Choose a model")}${p.usedBy?.length ? ` · ${esc(p.usedBy.join(", "))}` : ""}</small></span><span>${p.id === connections.activeId ? "Default · " : ""}${p.ready ? "Ready" : "Setup needed"}</span></button>`).join("");
     roster.querySelectorAll("[data-edit-provider]").forEach((button) => { button.onclick = () => { void cancelLogin(); const connection = connections.connections.find((p) => p.id === button.dataset.editProvider); if (connection) show(connection); }; });
@@ -106,7 +112,8 @@ export async function providerSettings(ctx, main) {
   main.querySelector(".settings-note").addEventListener("actionend", controls);
   main.querySelector("[data-test-section]").addEventListener("actionend", controls);
   const invalidate = () => { void cancelLogin(); picker.reset(); main.querySelector("[data-test-output]").hidden = true; controls(); };
-  for (const name of ["baseUrl", "apiKey"]) form.elements[name].addEventListener("input", invalidate);
+  form.elements.baseUrl.addEventListener("input", invalidate);
+  form.elements.apiKey.addEventListener("input", () => { if (publicCatalog()) { void cancelLogin(); controls(); } else invalidate(); });
   form.elements.clearKey.onchange = () => { if (form.elements.clearKey.checked) form.elements.apiKey.value = ""; invalidate(); };
   form.elements.auth.onchange = () => { form.elements.apiKey.value = ""; if (form.elements.auth.value === "none") form.elements.rememberKey.checked = false; invalidate(); };
   form.elements.kind.onchange = () => {
@@ -174,35 +181,42 @@ export async function providerSettings(ctx, main) {
       }, { label: "Read and use key", html: `<p><code>${esc(path)}</code></p>` });
     }; });
   });
-  browserRoot.querySelector("[data-cancel-login]").onclick = () => void action(browserRoot, async () => { await cancelLogin(); feedback(browserRoot, "Sign-in cancelled.", "info"); });
   museRoot.querySelector("[data-muse-connect]").onclick = () => void action(museRoot, async () => {
     const updated = await post("/api/muse/connect", { id: !isNew && saved.baseUrl.replace(/\/+$/, "") === "https://api.meta.ai/v1" ? saved.id : undefined });
     connections = await ctx.get("/api/provider/connections");
     if (ctx.current()) { show(updated); feedback(museRoot, "Connected through Muse Code. Choose a model below.", "success"); ctx.changed(); }
   });
-  browserRoot.querySelector("[data-browser-login]").onclick = () => void action(browserRoot, async () => {
-    await cancelLogin();
-    const flow = await post("/api/oauth/openrouter/start", { id: !isNew && saved.baseUrl.replace(/\/+$/, "") === "https://openrouter.ai/api/v1" ? saved.id : undefined });
-    if (!ctx.current()) { await post("/api/oauth/openrouter/cancel", { id: flow.id }); return; }
-    login = flow;
-    browserRoot.querySelector("[data-cancel-login]").hidden = false;
-    browserRoot.querySelector("[data-login-link]").innerHTML = `<p class="field-hint">Finish signing in, then return here. <a href="${esc(flow.authorizationUrl)}" target="_blank" rel="noopener noreferrer">Open sign-in again</a></p>`;
-    window.open(flow.authorizationUrl, "_blank", "noopener");
-    async function poll() {
-      if (!ctx.current() || login?.id !== flow.id) return;
-      try {
-        const state = await ctx.get(`/api/oauth/openrouter/status?id=${enc(flow.id)}`);
+  function browserLogin(root, provider, baseUrl) {
+    root.querySelector("[data-cancel-login]").onclick = () => void action(root, async () => { await cancelLogin(); feedback(root, "Sign-in cancelled.", "info"); });
+    root.querySelector("[data-browser-login]").onclick = () => void action(root, async () => {
+      const epoch = await cancelLogin();
+      if (!ctx.current() || epoch !== loginEpoch) return;
+      const flow = await post(`/api/oauth/${provider}/start`, { id: !isNew && saved.baseUrl.replace(/\/+$/, "") === baseUrl ? saved.id : undefined });
+      if (!ctx.current() || epoch !== loginEpoch) { await post(`/api/oauth/${provider}/cancel`, { id: flow.id }); return; }
+      login = { ...flow, root, provider };
+      root.querySelector("[data-cancel-login]").hidden = false;
+      root.querySelector("[data-login-link]").innerHTML = `<p class="field-hint">Finish signing in, then return here. <a href="${esc(flow.authorizationUrl)}" target="_blank" rel="noopener noreferrer">Open sign-in again</a></p>`;
+      window.open(flow.authorizationUrl, "_blank", "noopener");
+      async function poll() {
         if (!ctx.current() || login?.id !== flow.id) return;
-        if (state.state === "connected") {
-          login = undefined; browserRoot.querySelector("[data-cancel-login]").hidden = true;
-          connections = await ctx.get("/api/provider/connections");
-          if (ctx.current()) { show(connections.connections.find((p) => p.id === state.connectionId)); feedback(browserRoot, "Connected. Choose a model below.", "success"); ctx.changed(); }
-        } else if (["failed", "cancelled"].includes(state.state)) { login = undefined; browserRoot.querySelector("[data-cancel-login]").hidden = true; feedback(browserRoot, state.error || "Sign-in cancelled."); }
-        else loginTimer = setTimeout(poll, 1000);
-      } catch (error) { if (ctx.current()) { login = undefined; feedback(browserRoot, error.message); } }
-    }
-    loginTimer = setTimeout(poll, 1000);
-  }, "Opening browser sign-in…");
+        try {
+          const state = await ctx.get(`/api/oauth/${provider}/status?id=${enc(flow.id)}`);
+          if (!ctx.current() || login?.id !== flow.id) return;
+          if (state.state === "connected") {
+            const refreshed = await ctx.get("/api/provider/connections");
+            if (!ctx.current() || login?.id !== flow.id) return;
+            connections = refreshed;
+            show(connections.connections.find((p) => p.id === state.connectionId));
+            feedback(root, provider === "tiyuvta" && saved.model ? "Connected to Tiyuvta. You can change the model below." : "Connected. Choose a model below.", "success"); ctx.changed();
+          } else if (["failed", "cancelled"].includes(state.state)) { login = undefined; root.querySelector("[data-cancel-login]").hidden = true; root.querySelector("[data-login-link]").innerHTML = ""; feedback(root, state.error || "Sign-in cancelled."); }
+          else loginTimer = setTimeout(poll, 1000);
+        } catch (error) { if (ctx.current() && login?.id === flow.id) { await cancelLogin(); feedback(root, error.message); } }
+      }
+      loginTimer = setTimeout(poll, 1000);
+    }, "Opening browser sign-in…");
+  }
+  browserLogin(browserRoot, "openrouter", "https://openrouter.ai/api/v1");
+  if (featuredRoot && featured.id === "tiyuvta") browserLogin(featuredRoot, "tiyuvta", featured.baseUrl);
   const requested = new URLSearchParams(location.hash.split("?")[1] || "").get("preset");
   const requestedPreset = presets.find((p) => p.id === requested);
   if (requestedPreset) newConnection(requestedPreset); else show(saved);

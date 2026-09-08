@@ -1,10 +1,16 @@
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-process.env.LINUBOT_DATA = mkdtempSync(join(tmpdir(), "linubot-ev-"));
+const directory = mkdtempSync(join(tmpdir(), "linubot-ev-"));
+const prior = process.env.LINUBOT_DATA;
+process.env.LINUBOT_DATA = directory;
+after(() => {
+  rmSync(directory, { recursive: true, force: true });
+  if (prior === undefined) delete process.env.LINUBOT_DATA; else process.env.LINUBOT_DATA = prior;
+});
 const { appendEvent, lastSeq, previewOf, tailEvents } = await import("../src/events/log.ts");
 
 describe("event log", () => {

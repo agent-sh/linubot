@@ -4,10 +4,24 @@ Linubot separates deterministic application tests, real desktop/workspace checks
 and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
+Releases are cut from clean, synchronized `main` with `npm run release --
+--notes /path/to/notes.md`, which requests the tag-triggered hosted release workflow.
+Use `node scripts/release.mjs --dry-run` to check prerequisites first. The command
+runs acceptance, secret-scan and artifact-integrity gates before verifying a
+draft's assets and publishing it in the hosted job. Installation remains a separate explicit step;
+see [updates](UPDATES.md#release-checks-for-maintainers). Integration branches can
+run the same gates with `node scripts/release.mjs --build-only`, without any
+tag or publication write. Hosted execution still needs a real owner-authorized
+run after the documented signing secrets are configured.
+
 ## Release acceptance: 2.11.0
 
 Checked on 2026-09-08: 334 source tests, eight packaged desktop scenarios,
 and Android QR unit tests/build/lint passed.
+The source desktop suite now has ten scenarios, including Connected tools
+connection errors and phone settings validation.
+Linux artifact reduction checked on 2026-09-08: typecheck, 334 source tests, all eight packaged desktop scenarios, release artifacts, packaged Node version smoke and bundled runner execution passed.
+
 
 Built-in workspace, memory, session, skill, web and artifact tools are always
 loaded. Only connected MCP tools go through `search_tools`, covered by

@@ -38,8 +38,49 @@ are retained, and application data stays in its separate location.
 
 The application-menu entry points directly to the installed icon. When desktop
 cache utilities are available, the installer refreshes icon and application
-listings too. It releases the installation lock before `--launch` starts
-Linubot, so the running app does not keep that lock and block later upgrades.
+listings too. It releases the installation lock before launching Linubot, so the running app
+does not keep that lock and block later upgrades.
+
+When a user systemd manager is available, installation writes and enables
+`~/.config/systemd/user/linubot.service` for `graphical-session.target`.
+The application-menu entry starts the unit, then sends a single-instance show
+request so a hidden background window reappears without replacing the supervised
+process. The show request exits if no instance owns the lock; it cannot become
+an unsupervised primary. `--launch`
+and `--activate-only` use `systemctl --user restart linubot`. Without a user
+systemd manager, they use the plain `~/.local/bin/linubot` launcher.
+If integration, enabling or activation fails, the installer restores the prior
+active version and its launcher, menu, icon and service files, and attempts to
+restart it. The candidate remains staged. A failed recovery start is logged and
+leaves the old version selected for manual retry. Later runtime crashes are
+handled by systemd restart policy, not automatic version rollback.
+
+The service clears `ELECTRON_RUN_AS_NODE`, restarts after failures with a
+five-second delay, and limits starts to three in five minutes. A normal quit
+does not restart the app. During activation, an active legacy transient unit
+named `linubot-desktop` is stopped before the new unit starts.
+
+Inspect failures with `journalctl --user -u linubot.service`. After resolving a
+repeated startup failure, use `systemctl --user reset-failed linubot` before
+starting it again. `KillMode=process` lets an update helper survive app shutdown.
+
+Releasing and installing are separate operations. To stage a version without
+changing the active symlink, desktop entry, service or running app:
+
+```sh
+bash install.sh --version 2.11.0 --stage-only
+```
+
+After finishing active work, explicitly activate the staged version and restart:
+
+```sh
+bash install.sh --version 2.11.0 --activate-only
+```
+
+Use a fresh installer for these commands. `--stage-only` also remains harmless
+when that version is already staged. The in-app updater waits for its old
+process to exit before activation. For a manually launched, unsupervised app,
+quit it before running `--activate-only` so its single-instance lock is released.
 
 To pin a release instead of selecting the latest:
 
@@ -153,6 +194,30 @@ specific built installer with your package manager:
 ```sh
 sudo apt install ./release/linubot-2.10.0-amd64.deb
 ```
+
+The Linux x64 2.11.0 packaging reduction was measured on 2026-09-08 with the
+same Electron, workspace and runner binaries on both sides (MiB = 1,048,576
+bytes). Unpacked sizes use `du` after `npm run release:artifacts` adds the
+installer icon; archive sizes use file lengths.
+
+| Artifact | Before | After |
+| --- | ---: | ---: |
+| Unpacked application | 397.02 MiB | 380.21 MiB |
+| `.tar.gz` | 160.06 MiB | 155.79 MiB |
+| `.deb` | 127.04 MiB | 123.92 MiB |
+
+Only Electron's `en-US` locale is bundled. The ASAR excludes tests, docs,
+fixtures, examples, coverage reports, source maps, TypeScript sources and
+non-license Markdown, plus the duplicate browser wrapper whose runtime copy
+is in `resources/`. The ASAR shrank from 21.69 to 13.47 MiB, with 4,495 to 2,933
+listed entries and no unpacked ASAR payload. Runtime code such as YAML's `doc`
+directory remains included.
+
+Electron (218 MiB), the workspace backend (35 MiB), and `uv` (58 MiB) remain
+bundled. The packaged `uvx` launches the adjacent `uv` executable. Workspace and
+runner provenance and licenses, Chromium licenses, the sandbox, SwiftShader,
+and icons used by desktop, web and installer paths remain included. Compression
+settings and startup behavior are unchanged; actual sizes vary with tool versions.
 
 For a user installation with versioned directories, use the release installer
 or its `--build` option above. To test a local unpacked candidate directly, launch

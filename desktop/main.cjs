@@ -1,7 +1,7 @@
 const { app, BrowserWindow, Menu, Tray, nativeImage, shell, dialog, safeStorage } = require('electron');
 const { join, dirname } = require('node:path');
-const { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync, rmSync, realpathSync } = require('node:fs');
-const { execFile, execFileSync } = require('node:child_process');
+const { mkdirSync, readFileSync, writeFileSync, existsSync, renameSync, rmSync, realpathSync, openSync, closeSync } = require('node:fs');
+const { execFile, spawn, spawnSync } = require('node:child_process');
 const { randomBytes } = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 
@@ -14,7 +14,9 @@ const settingsFile = join(data, 'desktop.json');
 let settings = { background: false };
 try { settings = { ...settings, ...JSON.parse(readFileSync(settingsFile, 'utf8')) }; } catch (error) { if (error.code !== 'ENOENT') console.error('Unable to read desktop preferences:', error.message); }
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// A menu activation may notify the existing instance, but must never become
+// an unsupervised primary if the service is still starting or has just failed.
+if (!app.requestSingleInstanceLock() || app.commandLine.hasSwitch('linubot-show')) app.quit();
 else {
   let window, tray, backend, origin;
   let quitting = false;
@@ -69,27 +71,42 @@ else {
       });
     }
     const { createApp } = await import(pathToFileURL(join(__dirname, '..', 'dist', 'server.js')).href);
-    const { createUpdates } = await import(pathToFileURL(join(__dirname, '..', 'dist', 'updates.js')).href);
+    const { createUpdates, managedUpdateInstaller } = await import(pathToFileURL(join(__dirname, '..', 'dist', 'updates.js')).href);
     const installRoot = join(app.getPath('home'), '.local', 'opt');
     const launcher = join(installRoot, 'linubot', 'linubot');
     const managedInstall = app.isPackaged && existsSync(launcher) && realpathSync(launcher) === realpathSync(app.getPath('exe')) && !existsSync(join(dirname(realpathSync(app.getPath('exe'))), '.linubot-source-build'));
     const updates = createUpdates({
       enabled: process.env.LINUBOT_UPDATE_CHECK !== '0',
-      ...(managedInstall ? { install: async (release) => {
-        if (backend.hasActiveWork()) throw new Error('Finish active tasks before upgrading Linubot.');
-        const installer = join(process.resourcesPath, 'install.sh');
-        await new Promise((resolve, reject) => execFile('/bin/bash', [installer, '--version', release.version, '--stage-only'], { timeout: 630000, maxBuffer: 32768, env: { ...process.env, LINUBOT_INSTALL_ROOT: installRoot } }, (error) => {
-          if (error) reject(new Error('The update could not be downloaded or verified. Your installed version is unchanged.')); else resolve();
-        }));
-        if (backend.hasActiveWork()) throw new Error('The update is downloaded. Finish active tasks, then click Upgrade again to restart.');
-        const resume = backend.freezeForUpdate();
-        try {
-          // Activation only changes the launcher symlink. Running files and user data stay intact.
-          execFileSync('/bin/bash', [installer, '--version', release.version, '--activate-only'], { timeout: 15000, maxBuffer: 32768, env: { ...process.env, LINUBOT_INSTALL_ROOT: installRoot } });
-          app.relaunch({ execPath: launcher });
-          setImmediate(() => app.quit());
-        } catch (error) { resume(); throw new Error('The staged update could not be activated. Restart Linubot or retry the installer.'); }
-      } } : {}),
+      ...(managedInstall ? { install: managedUpdateInstaller({
+        hasActiveWork: () => backend.hasActiveWork(),
+        stage: async (release) => {
+          const installer = join(process.resourcesPath, 'install.sh');
+          await new Promise((resolve, reject) => execFile('/bin/bash', [installer, '--version', release.version, '--stage-only'], { timeout: 630000, maxBuffer: 32768, env: { ...process.env, LINUBOT_INSTALL_ROOT: installRoot } }, (error) => {
+            if (error) reject(new Error('The update could not be downloaded or verified. Your installed version is unchanged.')); else resolve();
+          }));
+        },
+        freeze: () => backend.freezeForUpdate(),
+        activateAfterExit: async (release) => {
+          // Use the verified new payload's installer. A separate unit survives
+          // teardown of both linubot.service and the old transient desktop unit.
+          const installer = join(installRoot, `linubot-${release.version}`, 'resources', 'install.sh');
+          const script = 'for ((i=0; i<120; i++)); do if ! kill -0 "$1" 2>/dev/null; then exec /bin/bash "$2" --version "$3" --activate-only; fi; sleep 1; done; echo "Linubot did not exit; update remains staged." >&2; exit 1';
+          const args = ['-c', script, 'linubot-update', String(process.pid), installer, release.version];
+          const env = { ...process.env, LINUBOT_INSTALL_ROOT: installRoot }; delete env.ELECTRON_RUN_AS_NODE;
+          if (spawnSync('systemctl', ['--user', 'show-environment'], { stdio: 'ignore', timeout: 5000 }).status === 0) {
+            await new Promise((resolve, reject) => execFile('systemd-run', ['--user', '--collect', `--unit=linubot-update-${process.pid}`, '--property=Type=exec', '/bin/bash', ...args], { env, timeout: 15000 }, (error) => error ? reject(error) : resolve()));
+          } else {
+            const log = openSync(join(data, 'update-install.log'), 'a', 0o600);
+            try {
+              await new Promise((resolve, reject) => {
+                const child = spawn('/bin/bash', args, { env, detached: true, stdio: ['ignore', log, log] });
+                child.once('error', reject); child.once('spawn', () => { child.unref(); resolve(); });
+              });
+            } finally { closeSync(log); }
+          }
+        },
+        quit: () => setImmediate(() => app.quit()),
+      }) } : {}),
     });
     backend = createApp({ accessToken: token, onProviderConnected: show, updates, chooseImportFolder: async () => { const result = await dialog.showOpenDialog(window, { title: "Choose an exported bot folder", properties: ["openDirectory"] }); return result.canceled ? undefined : result.filePaths[0]; } });
     await new Promise((resolve, reject) => { backend.server.once('error', reject); backend.server.listen(0, '127.0.0.1', resolve); });
