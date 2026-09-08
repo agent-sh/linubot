@@ -55,7 +55,11 @@
       "web/**/*",
       "package.json",
       "LICENSE",
-      "NOTICE"
+      "NOTICE",
+      "!**/{test,tests,__tests__,docs,fixture,fixtures,example,examples,coverage}/**/*",
+      "!**/*.{map,ts,tsx,mts,cts}",
+      "!**/!(LICENSE|LICENCE|NOTICE|COPYING|license|licence|notice|copying).md",
+      "!desktop/linubot-chrome.sh"
     ],
     "extraResources": [
       {
@@ -115,7 +119,10 @@
         "chromium | chromium-browser | google-chrome-stable",
         "libc6 (>= 2.39)"
       ]
-    }
+    },
+    "electronLanguages": [
+      "en-US"
+    ]
   },
   "homepage": "https://github.com/agent-sh/linubot",
   "desktopName": "linubot.desktop",

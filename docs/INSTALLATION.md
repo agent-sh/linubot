@@ -154,6 +154,30 @@ specific built installer with your package manager:
 sudo apt install ./release/linubot-2.10.0-amd64.deb
 ```
 
+The Linux x64 2.11.0 packaging reduction was measured on 2026-09-08 with the
+same Electron, workspace and runner binaries on both sides (MiB = 1,048,576
+bytes). Unpacked sizes use `du` after `npm run release:artifacts` adds the
+installer icon; archive sizes use file lengths.
+
+| Artifact | Before | After |
+| --- | ---: | ---: |
+| Unpacked application | 397.02 MiB | 380.21 MiB |
+| `.tar.gz` | 160.06 MiB | 155.79 MiB |
+| `.deb` | 127.04 MiB | 123.92 MiB |
+
+Only Electron's `en-US` locale is bundled. The ASAR excludes tests, docs,
+fixtures, examples, coverage reports, source maps, TypeScript sources and
+non-license Markdown, plus the duplicate browser wrapper whose runtime copy
+is in `resources/`. The ASAR shrank from 21.69 to 13.47 MiB, with 4,495 to 2,933
+listed entries and no unpacked ASAR payload. Runtime code such as YAML's `doc`
+directory remains included.
+
+Electron (218 MiB), the workspace backend (35 MiB), and `uv` (58 MiB) remain
+bundled. The packaged `uvx` launches the adjacent `uv` executable. Workspace and
+runner provenance and licenses, Chromium licenses, the sandbox, SwiftShader,
+and icons used by desktop, web and installer paths remain included. Compression
+settings and startup behavior are unchanged; actual sizes vary with tool versions.
+
 For a user installation with versioned directories, use the release installer
 or its `--build` option above. To test a local unpacked candidate directly, launch
 `release/linux-unpacked/linubot` with a separate data directory and Electron

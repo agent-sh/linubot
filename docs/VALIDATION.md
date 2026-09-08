@@ -10,6 +10,8 @@ Checked on 2026-09-08: 334 source tests, eight packaged desktop scenarios,
 and Android QR unit tests/build/lint passed.
 The source desktop suite now has ten scenarios, including Connected tools
 connection errors and phone settings validation.
+Linux artifact reduction checked on 2026-09-08: typecheck, 334 source tests, all eight packaged desktop scenarios, release artifacts, packaged Node version smoke and bundled runner execution passed.
+
 
 Built-in workspace, memory, session, skill, web and artifact tools are always
 loaded. Only connected MCP tools go through `search_tools`, covered by
