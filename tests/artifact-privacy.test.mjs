@@ -54,8 +54,8 @@ it('keeps ASAR, uv, uvx and custom owner paths strict, including CI paths checke
 });
 
 it('the package command disables real electron-builder upload scheduling even with CI, a tag and a token', () => {
-  // ci-info captures PR state at import time. Start the real library in a fresh
-  // tag environment instead of inheriting the outer test runner's PR context.
+  // The builder reads inherited PR signals and import-time CI metadata. Start
+  // it in a fresh tag environment instead of the outer test runner's PR context.
   execFileSync(process.execPath, ['--input-type=module', '-e', `
     import assert from 'node:assert/strict';
     import { readFileSync } from 'node:fs';
@@ -74,5 +74,7 @@ it('the package command disables real electron-builder upload scheduling even wi
     assert.equal(await scheduled(undefined), 1, 'control reproduces implicit tag publishing');
     assert.equal(await scheduled(policy), 0, 'the production package command disables scheduling');
   `], { env: { ...process.env, CI: 'true', GH_TOKEN: 'fixture-token', GITHUB_TOKEN: 'fixture-token',
-    GITHUB_REF_TYPE: 'tag', GITHUB_REF_NAME: 'v2.12.2', GITHUB_EVENT_NAME: 'push', GITHUB_HEAD_REF: '', GITHUB_BASE_REF: '', TRAVIS_PULL_REQUEST: 'false', CI_PULL_REQUEST: '' } });
+    GITHUB_ACTIONS: 'true', GITHUB_REF: 'refs/tags/v2.12.2', GITHUB_REF_TYPE: 'tag', GITHUB_REF_NAME: 'v2.12.2',
+    GITHUB_EVENT_NAME: 'push', GITHUB_EVENT_PATH: '', GITHUB_HEAD_REF: '', GITHUB_BASE_REF: '',
+    TRAVIS_PULL_REQUEST: 'false', CI_PULL_REQUEST: '', CIRCLE_PULL_REQUEST: '', BITRISE_PULL_REQUEST: '', APPVEYOR_PULL_REQUEST_NUMBER: '', PUBLISH_FOR_PULL_REQUEST: 'false' } });
 });
