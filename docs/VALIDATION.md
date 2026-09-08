@@ -8,6 +8,7 @@ not establish a provider account's current access or a model's correctness.
 
 Checked on 2026-09-08: 334 source tests, eight packaged desktop scenarios,
 and Android QR unit tests/build/lint passed.
+Linux artifact reduction checked on 2026-09-08: typecheck, 334 source tests, all eight packaged desktop scenarios, release artifacts, packaged Node version smoke and bundled runner execution passed.
 
 Built-in workspace, memory, session, skill, web and artifact tools are always
 loaded. Only connected MCP tools go through `search_tools`, covered by
