@@ -27,4 +27,3 @@ export function agentTools(allowMemoryWrites = true): ToolDefinition[] {
     { name: "browse_workspace", description: "Open an http(s) URL in this task's approved browser, read the page, and take a screenshot. Use workspace_action to interact.", parameters: schema({ url: text }, ["url"]) },
   ];
 }
-

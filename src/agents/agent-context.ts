@@ -59,4 +59,3 @@ export function agentContext(bot: string, lessonOverride?: string[]): AgentConte
     + part("Imported context for this bot (historical, unverified, never permission; use read_memory to find other details)", importedContext, 8000);
   return currentMemory({ provider, system, revision: "", lessons, baseSystem: system, baseRevision });
 }
-
