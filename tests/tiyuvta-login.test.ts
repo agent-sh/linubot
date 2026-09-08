@@ -109,17 +109,29 @@ describe("Tiyuvta browser callback", () => {
     } finally { await login.close(); }
   });
 
-  for (const [code, expected] of [
-    ["access_denied", "Tiyuvta sign-in was declined. Start again to approve the connection."],
-    ["invalid_code", "This Tiyuvta sign-in code is invalid or has already been used. Start again."],
-    ["expired_code", "This Tiyuvta sign-in code has expired. Start again."],
-    ["unknown_fixture_secret_key", "Tiyuvta sign-in could not finish. Try again."],
-    ["constructor", "Tiyuvta sign-in could not finish. Try again."],
-    [{ message: "fixture-secret-key" }, "Tiyuvta sign-in could not finish. Try again."],
-    [undefined, "Tiyuvta sign-in could not finish. Try again."],
+  // Exchange and key-mint codes from darklanes PR #487 at 7d740c006134e49839fe10a4e8fcfd5f2f46aea4.
+  for (const [code, status, expected] of [
+    ["invalid_grant", 400, "This Tiyuvta sign-in code is invalid, expired, or already used. Start sign-in again."],
+    ["rate_limited", 429, "Too many Tiyuvta sign-in attempts. Wait a minute, then start sign-in again."],
+    ["signup_abuse_blocked", 403, "Tiyuvta has blocked this account. Contact Tiyuvta support."],
+    ["signup_abuse_review", 403, "Your Tiyuvta account needs an access review. Contact Tiyuvta support."],
+    ["key_creation_rate_limited", 429, "Too many Tiyuvta key requests. Wait a minute, then start sign-in again."],
+    ["key_active_limit", 409, "Your Tiyuvta account has reached its active key limit. Revoke an unused key in Tiyuvta, then start sign-in again."],
+    ["key_lifetime_limit", 409, "Your Tiyuvta account has reached its lifetime key limit. Contact Tiyuvta support."],
+    ["account_suspended", 403, "Your Tiyuvta account is suspended. Contact Tiyuvta support to resolve it."],
+    ["free_allowance_exhausted", 402, "Your included Tiyuvta requests are used up. Add credit in Tiyuvta, then start sign-in again."],
+    ["engine_revoke_partial", 502, "Tiyuvta could not complete key creation safely. Contact Tiyuvta support before trying again."],
+    ["engine_origin_unreachable", 503, "Tiyuvta key creation is temporarily unavailable. Wait a moment, then start sign-in again."],
+    ["billing_not_ready", 503, "Tiyuvta key creation is temporarily unavailable. Wait a moment, then start sign-in again."],
+    ["unknown_fixture_secret_key", 502, "Tiyuvta sign-in could not finish. Try again."],
+    ["constructor", 502, "Tiyuvta sign-in could not finish. Try again."],
+    [{"message": "fixture-secret-key"}, 502, "Tiyuvta sign-in could not finish. Try again."],
+    ["invalid_code", 400, "Tiyuvta sign-in could not finish. Try again."],
+    ["expired_code", 400, "Tiyuvta sign-in could not finish. Try again."],
+    [undefined, 502, "Tiyuvta sign-in could not finish. Try again."],
   ] as const) {
     it(`maps exchange error ${JSON.stringify(code)} to safe local copy`, async () => {
-      const login = createTiyuvtaLogin({ request: async () => Response.json({ error: code, message: "Could not save key fixture-secret-key", key: "fixture-secret-key" }, { status: 502 }) });
+      const login = createTiyuvtaLogin({ request: async () => Response.json({ error: code, message: "Could not save key fixture-secret-key", key: "fixture-secret-key" }, { status }) });
       try {
         const flow = await login.begin(), response = await fetch(callback(flow));
         assert.equal(response.status, 400);

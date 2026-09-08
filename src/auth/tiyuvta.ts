@@ -11,9 +11,18 @@ interface Login { id: string; verifier: string; state: State; controller: AbortC
 const BASE = "https://api.tiyuvta.ai/v1";
 function exchangeError(code: unknown): string {
   switch (code) {
-    case "access_denied": return "Tiyuvta sign-in was declined. Start again to approve the connection.";
-    case "invalid_code": return "This Tiyuvta sign-in code is invalid or has already been used. Start again.";
-    case "expired_code": return "This Tiyuvta sign-in code has expired. Start again.";
+    case "invalid_grant": return "This Tiyuvta sign-in code is invalid, expired, or already used. Start sign-in again.";
+    case "rate_limited": return "Too many Tiyuvta sign-in attempts. Wait a minute, then start sign-in again.";
+    case "signup_abuse_blocked": return "Tiyuvta has blocked this account. Contact Tiyuvta support.";
+    case "signup_abuse_review": return "Your Tiyuvta account needs an access review. Contact Tiyuvta support.";
+    case "key_creation_rate_limited": return "Too many Tiyuvta key requests. Wait a minute, then start sign-in again.";
+    case "key_active_limit": return "Your Tiyuvta account has reached its active key limit. Revoke an unused key in Tiyuvta, then start sign-in again.";
+    case "key_lifetime_limit": return "Your Tiyuvta account has reached its lifetime key limit. Contact Tiyuvta support.";
+    case "account_suspended": return "Your Tiyuvta account is suspended. Contact Tiyuvta support to resolve it.";
+    case "free_allowance_exhausted": return "Your included Tiyuvta requests are used up. Add credit in Tiyuvta, then start sign-in again.";
+    case "engine_revoke_partial": return "Tiyuvta could not complete key creation safely. Contact Tiyuvta support before trying again.";
+    case "engine_origin_unreachable": return "Tiyuvta key creation is temporarily unavailable. Wait a moment, then start sign-in again.";
+    case "billing_not_ready": return "Tiyuvta key creation is temporarily unavailable. Wait a moment, then start sign-in again.";
     default: return "Tiyuvta sign-in could not finish. Try again.";
   }
 }
