@@ -8,6 +8,8 @@ not establish a provider account's current access or a model's correctness.
 
 Checked on 2026-09-08: 334 source tests, eight packaged desktop scenarios,
 and Android QR unit tests/build/lint passed.
+The source desktop suite now has ten scenarios, including Connected tools
+connection errors and phone settings validation.
 
 Built-in workspace, memory, session, skill, web and artifact tools are always
 loaded. Only connected MCP tools go through `search_tools`, covered by

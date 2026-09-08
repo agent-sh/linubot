@@ -193,3 +193,7 @@
   .conversation-identity > div { min-width: 0; }
   .conversation-identity h1, .conversation-identity p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
+
+.retention-sizes { display: flex; flex-wrap: wrap; gap: 1rem 2rem; }
+.retention-sizes dd { margin: .25rem 0 0; font-variant-numeric: tabular-nums; }
+[data-retention-run] { margin-top: 1rem; }

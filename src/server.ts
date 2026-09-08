@@ -1,3 +1,4 @@
+import { retentionStatus, runRetention, setRetentionSettings } from "./retention.ts";
 import { createImportSync } from "./imports/sync.ts";
 import { permissionSettings, botPermission } from "./agents/permissions.ts";
 import { createPhoneAccess } from "./phone/access.ts";
@@ -435,6 +436,11 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         }
         if (r.length === 2 && method === "DELETE") { ok(removeJob(r[1])); return; }
       }
+      if (r[0] === "retention") {
+        if (r.length === 1 && method === "GET") { ok(retentionStatus()); return; }
+        if (r.length === 1 && method === "PUT") { ok(setRetentionSettings({ screenshotDays: b.screenshotDays as number })); return; }
+        if (r.length === 2 && r[1] === "run" && method === "POST") { ok(await retain()); return; }
+      }
       if (r[0] === "screenshots" && r.length === 2 && method === "GET") {
         if (!/^[a-f0-9-]{36}$/.test(r[1])) throw new InputError("Invalid screenshot ID");
         const image = join(dataDir(), "screenshots", `${r[1]}.png`);
@@ -617,6 +623,15 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   });
   server.requestTimeout = 300000;
   server.headersTimeout = 10000;
+  let retentionTimer: NodeJS.Timeout | undefined;
+  const retain = () => runRetention({ runningScopes: () => computer.owned().filter(entry => entry.state === "running").flatMap(entry => entry.scope ? [entry.scope] : []) });
+  const automaticRetention = () => { void retain().catch(error => console.error("Retention failed:", error)); };
+  server.once("listening", () => {
+    if (!options.accessToken) return;
+    automaticRetention();
+    retentionTimer = setInterval(automaticRetention, 6 * 60 * 60 * 1000);
+    retentionTimer.unref();
+  });
   let scheduler: NodeJS.Timeout | undefined;
   server.once("listening", () => {
     if (options.scheduler === false) return;
@@ -634,6 +649,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   }, hasActiveWork: () => runtime.busy() || workspaceView.busy() || evaluations.size > 0 || Boolean(jobsRunning), async close() {
     stopping = true;
     clearInterval(scheduler);
+    clearInterval(retentionTimer);
     evaluations.forEach((controller) => controller.abort(new Error("Server is stopping")));
     await phone.close();
     workspaceView.close();

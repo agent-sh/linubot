@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FetchFn, ProviderConfig } from "../src/auth/providers.ts";
@@ -51,8 +51,9 @@ describe("auth v2", () => {
     await assert.rejects(() => chatComplete({ ...cfg, apiKey: "k" }, msgs, bad), /HTTP 401/i);
   });
 
-  it("machine reads need approval and only listed candidate files", () => {
+  it("machine reads need approval and only listed candidate files", (t) => {
     const home = mkdtempSync(join(tmpdir(), "linubot-home-"));
+    t.after(() => rmSync(home, { recursive: true, force: true }));
     mkdirSync(join(home, ".codex"), { recursive: true });
     writeFileSync(join(home, ".codex", "auth.json"), JSON.stringify({ OPENAI_API_KEY: "s3cret" }));
     const prior = process.env.HOME;

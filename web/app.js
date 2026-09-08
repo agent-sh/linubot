@@ -133,7 +133,7 @@ async function renderRoute({ refresh = false } = {}) {
     if (kind === "home") renderHome(ctx);
     else if (["bot", "group"].includes(kind) && name) await renderConversation(ctx);
     else if (kind === "sessions") await renderSessions(ctx);
-    else if (kind === "advanced") renderAdvanced(ctx);
+    else if (kind === "advanced") await renderAdvanced(ctx);
     else if (kind === "lab") await renderLab(ctx);
     else if (kind === "routines") await renderRoutines(ctx);
     else if (kind === "library") await renderLibrary(ctx);
