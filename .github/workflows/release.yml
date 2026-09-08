@@ -1,55 +1,64 @@
 name: release
 
 on:
-  workflow_dispatch:
-    inputs:
-      notes:
-        description: Release notes (Markdown)
-        type: string
-        required: true
-      resume:
-        description: Resume publication using the existing verified receipt and artifacts
-        type: boolean
-        default: false
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+']
 
 permissions:
   contents: write
 
+# This workflow is the only publisher. Local release.mjs pushes an annotated
+# tag with notes; this workflow never creates or pushes a tag.
 concurrency:
   group: linubot-release
   cancel-in-progress: false
 
 jobs:
   release:
-    if: github.ref == 'refs/heads/main'
-    # Dedicated qualified builder, never the owner's running desktop. Provision
-    # Android SDK/JDK 17, signing files, uv/uvx and GUI libraries as documented.
-    runs-on: [self-hosted, Linux, X64, linubot-release]
-    environment: release
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: main
           fetch-depth: 0
-          # Preserve ignored artifacts and the receipt for --resume. The script
-          # independently rejects dirty source and a moved main branch.
-          clean: false
+          persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           cache: npm
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install packaging and desktop prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            dbus-x11 xvfb xauth libgtk-3-0t64 libnss3 libxss1 libxtst6 \
+            libatspi2.0-0t64 libdrm2 libgbm1 libasound2t64 \
+            openbox xdotool x11-utils ffmpeg xclip bubblewrap libxkbcommon-x11-0 \
+            curl unzip dpkg-dev
+          python3 -m pip install --user --break-system-packages uv==0.11.7
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-37' 'build-tools;36.0.0'
       - run: npm ci
-      - name: Validate and publish the release
+      - name: Build, verify and publish the existing tag
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_NOTES: ${{ inputs.notes }}
-          RELEASE_RESUME: ${{ inputs.resume }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.LINUBOT_ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_STORE_PASSWORD: ${{ secrets.LINUBOT_ANDROID_STORE_PASSWORD }}
         shell: bash
         run: |
-          notes=$(mktemp "$RUNNER_TEMP/linubot-release-notes.XXXXXXXX")
-          trap 'rm -f -- "$notes"' EXIT
-          printf '%s\n' "$RELEASE_NOTES" > "$notes"
-          args=(--notes "$notes")
-          if [ "$RELEASE_RESUME" = true ]; then args+=(--resume); fi
-          npm run release -- "${args[@]}"
+          set -euo pipefail
+          : "${ANDROID_KEYSTORE_BASE64:?Set LINUBOT_ANDROID_KEYSTORE_BASE64 in repository Actions secrets}"
+          : "${ANDROID_STORE_PASSWORD:?Set LINUBOT_ANDROID_STORE_PASSWORD in repository Actions secrets}"
+          signing="$HOME/.local/state/linubot-android-signing"
+          umask 077
+          mkdir -p "$signing"
+          trap 'rm -f -- "$signing/release.keystore" "$signing/password"' EXIT
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$signing/release.keystore"
+          printf '%s' "$ANDROID_STORE_PASSWORD" > "$signing/password"
+          unset ANDROID_KEYSTORE_BASE64 ANDROID_STORE_PASSWORD
+          dbus-run-session -- node scripts/release.mjs --github-release
+      - name: Remove signing files even if a prior step failed
+        if: always()
+        run: rm -f -- "$HOME/.local/state/linubot-android-signing/release.keystore" "$HOME/.local/state/linubot-android-signing/password"

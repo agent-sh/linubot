@@ -5,11 +5,14 @@ and live provider trials. A fixture test checks application behavior; it does
 not establish a provider account's current access or a model's correctness.
 
 Releases are cut from clean, synchronized `main` with `npm run release --
---notes /path/to/notes.md`, or the manual release workflow on a qualified runner.
+--notes /path/to/notes.md`, which requests the tag-triggered hosted release workflow.
 Use `node scripts/release.mjs --dry-run` to check prerequisites first. The command
 runs acceptance, secret-scan and artifact-integrity gates before verifying a
-draft's assets and publishing it. Installation remains a separate explicit step;
-see [updates](UPDATES.md#release-checks-for-maintainers).
+draft's assets and publishing it in the hosted job. Installation remains a separate explicit step;
+see [updates](UPDATES.md#release-checks-for-maintainers). Integration branches can
+run the same gates with `node scripts/release.mjs --build-only`, without any
+tag or publication write. Hosted execution still needs a real owner-authorized
+run after the documented signing secrets are configured.
 
 ## Release acceptance: 2.11.0
 

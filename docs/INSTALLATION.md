@@ -43,9 +43,18 @@ does not keep that lock and block later upgrades.
 
 When a user systemd manager is available, installation writes and enables
 `~/.config/systemd/user/linubot.service` for `graphical-session.target`.
-The application-menu entry uses `systemctl --user start linubot`; `--launch`
+The application-menu entry starts the unit, then sends a single-instance show
+request so a hidden background window reappears without replacing the supervised
+process. The show request exits if no instance owns the lock; it cannot become
+an unsupervised primary. `--launch`
 and `--activate-only` use `systemctl --user restart linubot`. Without a user
 systemd manager, they use the plain `~/.local/bin/linubot` launcher.
+If integration, enabling or activation fails, the installer restores the prior
+active version and its launcher, menu, icon and service files, and attempts to
+restart it. The candidate remains staged. A failed recovery start is logged and
+leaves the old version selected for manual retry. Later runtime crashes are
+handled by systemd restart policy, not automatic version rollback.
+
 The service clears `ELECTRON_RUN_AS_NODE`, restarts after failures with a
 five-second delay, and limits starts to three in five minutes. A normal quit
 does not restart the app. During activation, an active legacy transient unit

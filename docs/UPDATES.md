@@ -37,8 +37,11 @@ unit so stopping the desktop does not kill the installer. Its output is in the
 user journal. Without systemd, helper output goes to `update-install.log` in
 the app data directory. If shutdown takes more than two minutes, activation
 is abandoned and the version remains staged for a manual retry. An activation
-failure after the app exits requires rerunning the installer; it cannot appear
-in the closed window.
+failure after the app exits cannot appear in the closed window. If integration
+or service activation fails, the installer restores the previous active version
+and its integration files, then attempts to restart that version. The candidate
+stays staged for retry. A failure of the recovery start is reported in the helper
+log; the old version remains selected for an explicit retry.
 
 If downloading or verification fails, the current installation remains selected.
 Previous version directories are retained; they are not automatically deleted.
@@ -73,65 +76,97 @@ The Debian installer is a separate distribution artifact. Releases also include
 a signed Android APK; install a newer APK on Android to update that client.
 The Linux upgrade button updates the Linux application only.
 
-On the qualified Linux x64 build machine, from clean `main` equal to
-`origin/main`, with Node.js 24+, installed npm dependencies, GitHub CLI auth,
-JDK 17, Android SDK (including build-tools 36.0.0 and compile SDK 37), uv/uvx
-and the packaging/display tools described in [installation](INSTALLATION.md):
+The local release command and the tag workflow share build and integrity gates.
+Only the hosted workflow publishes releases. From clean `main` equal to
+`origin/main`, with Node.js 24+, a real `npm ci` dependency directory, GitHub CLI
+auth, JDK 17, Android SDK (build-tools 36.0.0 and platform 37), uv/uvx 0.11.7 and
+the Linux packaging/display prerequisites:
 
 ```sh
 node scripts/release.mjs --dry-run
 npm run release -- --notes /path/to/release-notes.md
 ```
 
-Set `ANDROID_HOME` if the SDK is not at `~/Android/Sdk`. Signing uses
-`~/.local/state/linubot-android-signing/release.keystore` and the nonempty
-`password` file beside it, with alias `linubot`. Keep both files private and
-outside Git. The password is passed only through the Android child environment.
-Release notes are required for publication. Dry run checks prerequisites and
-prints the plan without building, tagging, publishing or installing; it fetches
-Git refs and checks GitHub auth. It explicitly skips an existing version tag and
-allows omitted notes. All other prerequisites still apply, including main and
-a clean tree.
+The local command runs typecheck, source tests, Linux packaging, the packaged
+Playwright suite, signed Android tests/build/lint, artifact generation, pinned
+Gitleaks 8.30.1 scans of tracked files and all Git history, and integrity checks.
+Without DISPLAY it starts and stops Xvfb on a free display. It checks every
+shipped `dist/` file plus fixed ASAR desktop/web/license files. If the package
+configuration explicitly excludes source maps, it first removes those generated
+maps from `dist/`. The external Chrome wrapper is checked against source and
+across the unpacked, Debian and tar payloads, together with the executable,
+ASAR, workspace binary and installer. APK bytes and decompressed contents must
+not contain the builder's home directory path.
 
-The release command runs typecheck, source tests, Linux packaging, the packaged
-Playwright suite (starting and stopping Xvfb on a free display if needed), signed
-Android tests/build/lint, and artifact generation. It verifies the downloaded
-Gitleaks 8.30.1 checksum and requires clean tracked-tree and all-history scans.
-It compares the ASAR version, fixed desktop/web/license files and every `dist/`
-file with the working tree, compares key Debian/tar/unpacked payload hashes, and
-checks raw and decompressed APK contents for the builder's home directory path.
-Temporary scan/extraction files are removed even on failure.
+After those gates pass, the local command creates an annotated `vVERSION` tag
+whose message is the supplied notes, then pushes only that tag. The tag push
+starts the hosted workflow, which rebuilds and revalidates the exact tagged
+commit, uploads four assets to a draft, verifies GitHub sizes and SHA-256
+digests, and publishes as latest. Local artifacts are evidence from the local
+build; the workflow publishes its own independently checked build. There is no
+local release upload or second publisher. The workflow never creates or pushes
+a tag, so its token cannot recursively trigger publication.
 
-Only then does it create and push `vVERSION`, upload a draft containing the
-Debian package, Linux tarball, signed Android APK and `SHA256SUMS`, and verify all
-four GitHub asset sizes and SHA-256 digests. It publishes as latest only after
-that readback succeeds. It never changes the local installation.
+The tag must match package and Android versions, point to a commit on
+`origin/main`, and match the event SHA and current remote tag. Hosted checkout
+may be detached and main may advance while the tagged run is queued. Local
+requests still require synchronized main and reject an existing tag. Use a
+normal owner-authenticated local Git push: a push using Actions' `GITHUB_TOKEN`
+does not trigger another push workflow. See [GitHub's trigger documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
-A normal invocation rejects an existing tag. If publication is interrupted,
-retain the ignored `release/.release-VERSION.json` receipt and the four local
-assets, then rerun with the same notes and `--resume`. Resume requires the same
-clean main commit, version, notes hash and asset hashes. It reuses already tested
-bytes, safely replaces draft uploads, and verifies even an already published
-release before confirming latest. A changed main, missing receipt or changed
-artifact fails closed; do not delete a published tag to bypass that check.
+An interrupted local tag request can use `--resume` with its ignored
+`release/.release-VERSION.json` receipt, unchanged artifacts and the same notes.
+Once the tag is remote, pushing it again creates no event; rerun its failed
+Actions job. Hosted reruns rebuild and replace only draft assets. A completed
+release is read back against its checksum manifest and left unchanged, including
+its latest status. No mode changes the local installation.
 
-The manually dispatched **release** GitHub workflow runs this same command from
-main on a dedicated self-hosted Linux x64 runner labeled `linubot-release`, using
-the `release` environment. Provision the qualified Ubuntu 26.04 desktop/build
-libraries, Xvfb/xauth, curl, tar, unzip, dpkg-deb, GitHub CLI, SDK/JDK, signing
-files and uv/uvx on that runner. Configure environment reviewers as appropriate.
-The workflow accepts Markdown notes and an optional resume switch. It preserves
-ignored artifacts between attempts, serializes releases, and never installs or
-restarts the builder's desktop. Do not assign the label to the owner's live app
-machine. PR CI remains the source/fixture gate; it does not publish releases.
+### Validate an integration branch without publication
 
-To install after publication, use the explicit `--stage-only` then
-`--activate-only` commands in [installation](INSTALLATION.md). Existing releases
-through 2.11.0 contain the older updater and installer, so the first upgrade from
-those versions still follows their old Electron relaunch path. Run the fresh
-installer explicitly to register supervision immediately; subsequent in-app
-upgrades from this implementation use the unit restart path.
+After committing the assembled candidate and installing dependencies with
+`npm ci`, run from its repository root:
 
-Test a candidate on its documented Linux/glibc baseline and exercise upgrade
-behavior in an isolated profile. Source fixture CI does not qualify bundled
-binaries for older distributions. See [validation](VALIDATION.md).
+```sh
+node scripts/release.mjs --build-only
+```
+
+This permits any clean branch or detached commit and an already existing version
+tag. It needs the same SDK, signing files and build tools, but no notes. It runs
+all build/test/scan/integrity gates, prints the commit and four asset hashes, then
+exits before any tag, push, release, upload or publication write. It does fetch
+Git refs and check GitHub auth. `--build-only --dry-run` checks prerequisites and
+prints the plan. Do not package through a shared node_modules symlink: use a
+clean dependency installation in the assembled candidate.
+
+### Hosted runner and signing configuration
+
+The tag workflow uses GitHub-hosted `ubuntu-24.04`, the existing CI's pinned
+Node setup and JDK 17 setup actions, and the hosted Android SDK with platform 37
+and build-tools 36.0.0 installed explicitly. It installs desktop/package tools
+and uv/uvx 0.11.7. No custom runner label or GitHub environment is needed.
+
+Before the first real tag run, an owner must authorize provisioning these
+repository Actions secrets from the existing signing material:
+
+- `LINUBOT_ANDROID_KEYSTORE_BASE64`: base64 of the existing
+  `~/.local/state/linubot-android-signing/release.keystore`.
+- `LINUBOT_ANDROID_STORE_PASSWORD`: contents of the existing adjacent `password`
+  file. The signing alias remains `linubot`; do not generate a replacement key.
+
+The job writes private temporary signing files with umask 077, passes the
+password only through the Android child environment, and removes signing files
+on exit and in an always-run cleanup step. Never print secret values. Locally,
+the same signing directory is used directly; set `ANDROID_HOME` if the SDK is
+not at `~/Android/Sdk`.
+
+The reviewed repository inventory had Actions enabled, zero self-hosted runners,
+and neither signing secret configured. The hosted workflow configuration has
+not yet had a real release run. Local fixtures and a composed package are not
+proof of hosted execution or hosted Android signing. Provisioning secrets,
+creating a release tag and running the workflow remain separate owner actions.
+
+Use the explicit `--stage-only` then `--activate-only` installer commands in
+[installation](INSTALLATION.md) after publication. Existing releases through
+2.11.0 contain the older updater; their first upgrade follows the older Electron
+relaunch path. A fresh installer registers supervision immediately, and updates
+from this implementation use the unit restart path. See [validation](VALIDATION.md).

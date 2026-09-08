@@ -2,7 +2,7 @@ import { it } from "node:test";
 import assert from "node:assert/strict";
 import { createUpdates, managedUpdateInstaller, newerVersion, parseRelease } from "../src/updates.ts";
 import { createApp } from "../src/server.ts";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync, symlinkSync, readlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { execFileSync, spawnSync } from "node:child_process";
@@ -163,5 +163,43 @@ it("installer stage-only leaves integration alone, and activation uses supervisi
     writeFileSync(join(bin, "systemctl"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
     writeFileSync(join(target, "linubot"), '#!/bin/sh\ntest -z "${ELECTRON_RUN_AS_NODE+x}"\n', { mode: 0o755 });
     execFileSync(join(home, ".local/bin/linubot-start"), [], { env: { ...env, ELECTRON_RUN_AS_NODE: "1" } });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+for (const failure of ["enable", "restart"]) it(`activation restores the old version and integration after systemd ${failure} fails`, { skip: process.platform !== "linux" || process.arch !== "x64" || process.getuid?.() === 0 }, () => {
+  const dir = mkdtempSync(join(tmpdir(), "linubot-rollback-test-"));
+  try {
+    const home = join(dir, "home"), bin = join(dir, "bin"), root = join(home, ".local/opt"), old = join(root, "linubot-2.10.0"), target = join(root, "linubot-2.11.0"), calls = join(dir, "calls");
+    mkdirSync(bin);
+    for (const path of [old, target]) {
+      mkdirSync(join(path, "resources"), { recursive: true });
+      writeFileSync(join(path, ".linubot-managed"), "fixture");
+      writeFileSync(join(path, "linubot"), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+      writeFileSync(join(path, "resources/app.asar"), "fixture");
+      writeFileSync(join(path, "linubot.png"), "fixture");
+    }
+    symlinkSync(old, join(root, "linubot"));
+    const integration = [".local/bin/linubot", ".local/bin/linubot-start", ".local/share/applications/linubot.desktop", ".local/share/icons/hicolor/512x512/apps/linubot.png", ".config/systemd/user/linubot.service"];
+    for (const path of integration) { mkdirSync(join(home, path, ".."), { recursive: true }); writeFileSync(join(home, path), `original:${path}`); }
+    writeFileSync(join(bin, "systemctl"), `#!/bin/sh
+printf '%s\\n' "$*" >> "$LINUBOT_TEST_CALLS"
+if [ "$2" = "$LINUBOT_TEST_FAIL" ] && [ ! -f "$LINUBOT_TEST_CALLS.failed" ]; then touch "$LINUBOT_TEST_CALLS.failed"; exit 1; fi
+if [ "$2" = restart ]; then readlink "$LINUBOT_INSTALL_ROOT/linubot" >> "$LINUBOT_TEST_CALLS"; fi
+exit 0
+`, { mode: 0o755 });
+    for (const name of ["gtk-update-icon-cache", "update-desktop-database"]) writeFileSync(join(bin, name), "#!/bin/sh\nexit 0\n", { mode: 0o755 });
+    const env = { ...process.env, HOME: home, LINUBOT_INSTALL_ROOT: root, PATH: `${bin}:${process.env.PATH}`, LINUBOT_TEST_CALLS: calls, LINUBOT_TEST_FAIL: failure };
+    const result = spawnSync("bash", [resolve("install.sh"), "--version", "2.11.0", "--activate-only"], { env, encoding: "utf8" });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /restoring the previous installation/);
+    assert.equal(readlinkSync(join(root, "linubot")), old);
+    for (const path of integration) assert.equal(readFileSync(join(home, path), "utf8"), `original:${path}`);
+    assert(readFileSync(calls, "utf8").endsWith(`${old}\n`), "Recovery restart must resolve the old payload");
+    assert(existsSync(join(target, ".linubot-managed")), "Keep the downloaded candidate staged for retry");
+    // Rollback releases the lock, so an explicit retry can proceed.
+    const retry = spawnSync("bash", [resolve("install.sh"), "--version", "2.11.0", "--activate-only"], { env, encoding: "utf8" });
+    assert.equal(retry.status, 0, retry.stderr);
+    assert.equal(readlinkSync(join(root, "linubot")), target);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

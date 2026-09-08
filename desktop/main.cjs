@@ -14,7 +14,9 @@ const settingsFile = join(data, 'desktop.json');
 let settings = { background: false };
 try { settings = { ...settings, ...JSON.parse(readFileSync(settingsFile, 'utf8')) }; } catch (error) { if (error.code !== 'ENOENT') console.error('Unable to read desktop preferences:', error.message); }
 
-if (!app.requestSingleInstanceLock()) app.quit();
+// A menu activation may notify the existing instance, but must never become
+// an unsupervised primary if the service is still starting or has just failed.
+if (!app.requestSingleInstanceLock() || app.commandLine.hasSwitch('linubot-show')) app.quit();
 else {
   let window, tray, backend, origin;
   let quitting = false;
