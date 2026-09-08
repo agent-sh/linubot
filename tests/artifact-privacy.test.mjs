@@ -2,8 +2,7 @@ import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { PublishManager } from 'app-builder-lib/out/publish/PublishManager.js';
-import { CancellationToken } from 'builder-util-runtime';
+import { execFileSync } from 'node:child_process';
 import { verifyArtifactPrivacy } from '../scripts/artifact-privacy.mjs';
 import { workspaceRelease, workspaceReleaseUrl } from '../scripts/workspace-release.mjs';
 
@@ -54,21 +53,26 @@ it('keeps ASAR, uv, uvx and custom owner paths strict, including CI paths checke
   assert.throws(() => verifyArtifactPrivacy(workspacePath, Buffer.from('/home/private-builder/secret'), provenance, '/home/private-builder'), /Private build-machine path/);
 });
 
-it('the package command disables real electron-builder upload scheduling even with CI, a tag and a token', async t => {
-  const env = { CI: 'true', GH_TOKEN: 'fixture-token', GITHUB_REF_TYPE: 'tag', GITHUB_REF_NAME: 'v2.12.2', GITHUB_EVENT_NAME: 'push', GITHUB_HEAD_REF: '', TRAVIS_PULL_REQUEST: 'false', CI_PULL_REQUEST: '' };
-  const previous = Object.fromEntries(Object.keys(env).map(key => [key, process.env[key]]));
-  Object.assign(process.env, env);
-  t.after(() => { for (const [key, value] of Object.entries(previous)) { if (value === undefined) delete process.env[key]; else process.env[key] = value; } });
-  const command = JSON.parse(readFileSync('package.json', 'utf8')).scripts['package:linux'];
-  const policy = command.match(/\belectron-builder\b.*\s--publish\s+(\w+)\s*$/)?.[1];
-  assert.equal(policy, 'never');
-  async function scheduled(publish) {
-    let created, uploads = 0;
-    const manager = new PublishManager({ cancellationToken: new CancellationToken(), config: {}, appInfo: {}, onAfterPack() {}, onArtifactCreated(callback) { created = callback; } }, { publish });
-    manager.scheduleUpload = async () => { uploads++; };
-    await created({ file: 'fixture.deb', publishConfig: { provider: 'github', owner: 'fixture', repo: 'fixture' } });
-    return uploads;
-  }
-  assert.equal(await scheduled(undefined), 1, 'control reproduces implicit tag publishing');
-  assert.equal(await scheduled(policy), 0, 'the production package command disables scheduling');
+it('the package command disables real electron-builder upload scheduling even with CI, a tag and a token', () => {
+  // ci-info captures PR state at import time. Start the real library in a fresh
+  // tag environment instead of inheriting the outer test runner's PR context.
+  execFileSync(process.execPath, ['--input-type=module', '-e', `
+    import assert from 'node:assert/strict';
+    import { readFileSync } from 'node:fs';
+    import { PublishManager } from 'app-builder-lib/out/publish/PublishManager.js';
+    import { CancellationToken } from 'builder-util-runtime';
+    const command = JSON.parse(readFileSync('package.json', 'utf8')).scripts['package:linux'];
+    const policy = command.match(/\\belectron-builder\\b.*\\s--publish\\s+(\\w+)\\s*$/)?.[1];
+    assert.equal(policy, 'never');
+    async function scheduled(publish) {
+      let created, uploads = 0;
+      const manager = new PublishManager({ cancellationToken: new CancellationToken(), config: {}, appInfo: {}, onAfterPack() {}, onArtifactCreated(callback) { created = callback; } }, { publish });
+      manager.scheduleUpload = async () => { uploads++; };
+      await created({ file: 'fixture.deb', publishConfig: { provider: 'github', owner: 'fixture', repo: 'fixture' } });
+      return uploads;
+    }
+    assert.equal(await scheduled(undefined), 1, 'control reproduces implicit tag publishing');
+    assert.equal(await scheduled(policy), 0, 'the production package command disables scheduling');
+  `], { env: { ...process.env, CI: 'true', GH_TOKEN: 'fixture-token', GITHUB_TOKEN: 'fixture-token',
+    GITHUB_REF_TYPE: 'tag', GITHUB_REF_NAME: 'v2.12.2', GITHUB_EVENT_NAME: 'push', GITHUB_HEAD_REF: '', GITHUB_BASE_REF: '', TRAVIS_PULL_REQUEST: 'false', CI_PULL_REQUEST: '' } });
 });
