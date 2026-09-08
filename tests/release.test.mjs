@@ -7,7 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { parse } from 'yaml';
 import * as asar from '@electron/asar';
-import { checkPublicationRef, verifyArtifacts, prepareReleaseDist, verifyPublishedManifest, assetNames, verifyPayloadModes, canonicalNotes, readTagNotes, ensureReleaseTag } from '../scripts/release.mjs';
+import { checkPublicationRef, verifyArtifacts, prepareReleaseDist, verifyPublishedManifest, assetNames, verifyPayloadModes, canonicalNotes, readTagNotes, ensureReleaseTag, getOrCreateDraft, assertDraftRelease } from '../scripts/release.mjs';
 
 it('local tag requests require synchronized main while hosted publication accepts the exact tag on main', () => {
   const local = { hosted: false, branch: 'main', head: 'commit', mainHead: 'commit' };
@@ -206,5 +206,73 @@ Path('package-modes.json').write_text(json.dumps(modes))
       assert.throws(() => verifyPayloadModes(unpack(`bad-${name}`)), /Package permissions deny ordinary users access/);
       chmodSync(file, name === 'file' ? 0o644 : 0o755);
     }
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+
+it('new draft creation uses the POST response ID when tag lookup returns 404', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linubot-draft-readback-'));
+  try {
+    const tag = 'v2.12.2', head = 'a'.repeat(40), body = '# Release heading\n\nHard break  \nLast line  \n';
+    const notes = join(dir, 'notes.md'); writeFileSync(notes, body);
+    const draft = { id: 42, tag_name: tag, draft: true, prerelease: false, assets: [] };
+    const calls = [];
+    const api = (args) => {
+      calls.push(args);
+      if (args.some((arg) => arg.includes('/releases/tags/'))) throw new Error('Not Found (HTTP 404)');
+      if (args.includes('--paginate')) return [[]];
+      if (args.includes('POST')) {
+        assert.deepEqual(JSON.parse(readFileSync(args[args.indexOf('--input') + 1], 'utf8')), { tag_name: tag, target_commitish: head, name: tag, body, draft: true, prerelease: false });
+        return draft;
+      }
+      assert.deepEqual(args, ['api', 'repos/agent-sh/linubot/releases/42']);
+      return { ...draft, url: 'https://api.github.com/repos/agent-sh/linubot/releases/42' };
+    };
+    assert.throws(() => api(['api', `repos/agent-sh/linubot/releases/tags/${tag}`]), /404/);
+    calls.length = 0;
+    assert.equal(getOrCreateDraft({ tag, head, notes, temporary: dir }, api).id, 42);
+    assert.equal(calls.length, 3);
+    assert(!calls.some((args) => args.some((arg) => arg.includes('/releases/tags/'))));
+    assert.deepEqual(calls.at(-1), ['api', 'repos/agent-sh/linubot/releases/42']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+it('existing drafts are reused by ID and changed or non-draft readbacks fail closed', () => {
+  const tag = 'v2.12.2', draft = { id: 42, tag_name: tag, draft: true, prerelease: false, assets: [] };
+  const options = { tag, head: 'a'.repeat(40), notes: 'must-not-read', temporary: 'must-not-write' };
+  const lookup = (readback) => (args) => {
+    if (args.includes('--paginate')) return [[], [draft]];
+    assert.deepEqual(args, ['api', 'repos/agent-sh/linubot/releases/42']);
+    return readback;
+  };
+  assert.deepEqual(getOrCreateDraft(options, lookup(draft)), draft);
+  for (const changed of [{ id: 43 }, { tag_name: 'v2.12.3' }, { draft: false }, { prerelease: true }, { draft: 'true' }, { prerelease: undefined }]) {
+    assert.throws(() => getOrCreateDraft(options, lookup({ ...draft, ...changed })), /expected stable draft/);
+  }
+  for (const id of [undefined, null, 0, -1, '42']) assert.throws(() => assertDraftRelease({ ...draft, id }, tag), /expected stable draft/);
+  assert.throws(() => getOrCreateDraft(options, () => { throw new Error('API unavailable'); }), /API unavailable/);
+});
+
+it('a failed create response stops immediately and a later retry reuses the saved draft', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'linubot-draft-create-failure-'));
+  try {
+    const tag = 'v2.12.2', options = { tag, head: 'a'.repeat(40), notes: join(dir, 'notes.md'), temporary: dir };
+    writeFileSync(options.notes, '# Fixture notes\n');
+    let saved, creates = 0, reads = 0;
+    const api = (args) => {
+      if (args.includes('--paginate')) return [saved ? [saved] : []];
+      if (args.includes('POST')) {
+        creates++;
+        saved = { id: 42, tag_name: tag, draft: true, prerelease: false, assets: [] };
+        throw new Error('Create response connection lost');
+      }
+      assert.deepEqual(args, ['api', 'repos/agent-sh/linubot/releases/42']);
+      reads++;
+      return saved;
+    };
+    assert.throws(() => getOrCreateDraft(options, api), /connection lost/);
+    assert.equal(creates, 1); assert.equal(reads, 0);
+    assert.equal(getOrCreateDraft(options, api).id, 42);
+    assert.equal(creates, 1); assert.equal(reads, 1);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

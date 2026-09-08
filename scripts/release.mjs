@@ -97,6 +97,27 @@ export function verifyPublishedManifest(release, version, manifest) {
   }
 }
 
+export function assertDraftRelease(release, tag, id = release?.id) {
+  requireThat(Number.isSafeInteger(id) && id > 0 && release?.id === id && release.tag_name === tag && release.draft === true && release.prerelease === false,
+    `Release ${tag} must be the expected stable draft before uploading or publishing.`);
+}
+
+export function getOrCreateDraft({ tag, head, notes, temporary }, api = (args) => JSON.parse(output('gh', args))) {
+  // Listing distinguishes a missing draft from an API/auth failure. A pending
+  // draft tag is not available through REST /releases/tags/:tag.
+  const releases = api(['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`]).flat();
+  let release = releases.find((item) => item.tag_name === tag);
+  if (!release) {
+    const body = join(temporary, 'create-release.json');
+    writeFileSync(body, JSON.stringify({ tag_name: tag, target_commitish: head, name: tag, body: readFileSync(notes, 'utf8'), draft: true, prerelease: false }), { mode: 0o600 });
+    release = api(['api', '--method', 'POST', `repos/${repository}/releases`, '--input', body]);
+  }
+  assertDraftRelease(release, tag);
+  const draft = api(['api', `repos/${repository}/releases/${release.id}`]);
+  assertDraftRelease(draft, tag, release.id);
+  return draft;
+}
+
 export function checkPublicationRef({ hosted, branch, head, mainHead, tag, tagHead, onMain, eventName, eventRef, eventSha }) {
   if (hosted) {
     requireThat(eventName === 'push' && eventRef === `refs/tags/${tag}` && eventSha === head, 'Hosted publication requires the exact version-tag push event and commit.');
@@ -265,19 +286,11 @@ export function main(args = process.argv.slice(2)) {
         return;
       }
       requireThat(git('ls-remote', 'origin', `refs/tags/${tag}^{}`).startsWith(`${head}\t`), 'Remote release tag changed during validation.');
-      // A successful list distinguishes a missing draft from an API/auth failure.
-      const releases = JSON.parse(output('gh', ['api', '--paginate', '--slurp', `repos/${repository}/releases?per_page=100`])).flat();
-      let release = releases.find((item) => item.tag_name === tag);
-      if (!release) {
-        run('gh', ['release', 'create', tag, '--repo', repository, '--verify-tag', '--draft', '--title', tag, '--notes-file', notes]);
-        release = JSON.parse(output('gh', ['api', `repos/${repository}/releases/tags/${tag}`]));
-      }
-      requireThat(release.draft, `Release ${tag} is already published; refusing to replace public assets.`);
+      const release = getOrCreateDraft({ tag, head, notes, temporary });
       const verified = JSON.parse(readFileSync(receiptPath, 'utf8'));
-      if (release.draft) {
-        run('gh', ['release', 'edit', tag, '--repo', repository, '--notes-file', notes]);
-        run('gh', ['release', 'upload', tag, ...names.map((name) => join('release', name)), '--repo', repository, '--clobber']);
-      }
+      // gh upload/edit use their draft-aware GraphQL lookup, then REST by ID.
+      run('gh', ['release', 'edit', tag, '--repo', repository, '--notes-file', notes]);
+      run('gh', ['release', 'upload', tag, ...names.map((name) => join('release', name)), '--repo', repository, '--clobber']);
       const readBack = () => JSON.parse(output('gh', ['api', `repos/${repository}/releases/${release.id}`]));
       const verifyAssets = (remoteRelease) => {
         requireThat(!remoteRelease.prerelease && remoteRelease.assets.length === verified.assets.length, 'Release must be stable and contain exactly the four expected assets.');
@@ -286,7 +299,8 @@ export function main(args = process.argv.slice(2)) {
           requireThat(remoteAsset?.state === 'uploaded' && remoteAsset.size === local.size && remoteAsset.digest === `sha256:${local.sha256}`, `Release asset size/SHA-256 verification failed: ${local.name}. Draft will not be published.`);
         }
       };
-      verifyAssets(readBack());
+      const draft = readBack(); assertDraftRelease(draft, tag, release.id);
+      verifyAssets(draft);
       run('gh', ['release', 'edit', tag, '--repo', repository, '--draft=false', '--latest']);
       const published = readBack(); verifyAssets(published);
       requireThat(!published.draft && JSON.parse(output('gh', ['api', `repos/${repository}/releases/latest`])).id === published.id, 'Publication/latest readback failed.');
