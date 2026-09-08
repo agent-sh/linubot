@@ -64,10 +64,17 @@ export function createOpenRouterLogin(options: { request?: typeof fetch; connect
             const credential = { apiKey: data.key, rememberKey: providerStatus().credentialStorage };
             const saved = original ? setProvider({ id: original.id, ...credential }) : setProvider({ newConnection: true, name: "OpenRouter", kind: "openai-compat", baseUrl: BASE, auth: "bearer", model: "", ...credential });
             entry.connectionId = saved.id; entry.state = "connected"; clearTimeout(entry.timer);
-            res.writeHead(200); res.end(page("Connected to OpenRouter"), () => {
+            let completed = false;
+            const complete = () => {
+              if (completed) return;
+              completed = true;
               void close(entry);
               try { options.connected?.(saved.id!); } catch { console.error("Could not focus Linubot after sign-in"); }
-            });
+            };
+            // Exchange is complete: flush a live response or dispose of a departed browser.
+            res.once("finish", complete); res.once("close", complete); res.once("error", complete);
+            if (res.destroyed) complete();
+            else { res.writeHead(200); res.end(page("Connected to OpenRouter")); }
           } catch (error) {
             if (entry.state !== "cancelled") { entry.state = "failed"; entry.error = error instanceof InputError ? error.message : "OpenRouter sign-in could not finish. Try again."; }
             if (!res.destroyed) { res.writeHead(400); res.end(page("Connection was not completed")); }
