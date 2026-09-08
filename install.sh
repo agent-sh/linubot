@@ -15,10 +15,11 @@ while [ "$#" -gt 0 ]; do
     --stage-only) linubot_stage=1; shift ;;
     --activate-only) linubot_activate=1; shift ;;
     --launch) linubot_relaunch=1; shift ;;
-    --help) echo 'Usage: bash install.sh [--version 2.11.0] [--build] [--launch]'; exit 0 ;;
+    --help) echo 'Usage: bash install.sh [--version 2.11.0] [--build] [--stage-only | --activate-only] [--launch]'; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 1 ;;
   esac
 done
+[ "$linubot_stage" = 0 ] || [ "$linubot_activate" = 0 ] || { echo 'Choose either --stage-only or --activate-only.' >&2; exit 1; }
 [ "$(uname -s)" = Linux ] || { echo 'Linubot requires Linux.' >&2; exit 1; }
 [ "$(id -u)" != 0 ] || { echo 'Run this installer as your desktop user, without sudo.' >&2; exit 1; }
 case "$(uname -m)" in x86_64) linubot_arch=x64 ;; *) echo 'This release provides x86_64 Linux builds only.' >&2; exit 1 ;; esac
@@ -29,7 +30,51 @@ download() {
   else echo 'Install curl or wget first.' >&2; return 1; fi
 }
 linubot_tmp=$(mktemp -d "${TMPDIR:-/tmp}/linubot-install.XXXXXXXX")
-trap 'rm -rf -- "$linubot_tmp"' EXIT
+linubot_transaction=0
+linubot_systemd=0
+linubot_previous=""
+linubot_was_enabled=0
+linubot_restart_attempted=0
+cleanup() {
+  linubot_status=$?
+  trap - EXIT
+  if [ "$linubot_status" != 0 ] && [ "$linubot_transaction" = 1 ]; then
+    set +e
+    echo 'Activation failed; restoring the previous installation.' >&2
+    if [ "$linubot_restart_attempted" = 1 ]; then systemctl --user stop linubot; fi
+    if [ -L "$linubot_root/linubot" ] && [ "$(readlink "$linubot_root/linubot")" = "$linubot_target" ]; then
+      if [ -n "$linubot_previous" ]; then
+        ln -s "$linubot_previous" "$linubot_root/.linubot-rollback-$$" && mv -Tf "$linubot_root/.linubot-rollback-$$" "$linubot_root/linubot"
+      else
+        rm -f -- "$linubot_root/linubot"
+      fi
+    fi
+    for linubot_index in "${!linubot_integration[@]}"; do
+      linubot_file="${linubot_integration[$linubot_index]}"
+      rm -f -- "$linubot_file"
+      if [ -e "$linubot_tmp/integration-$linubot_index" ] || [ -L "$linubot_tmp/integration-$linubot_index" ]; then
+        cp -a -- "$linubot_tmp/integration-$linubot_index" "$linubot_file"
+      fi
+    done
+    if [ "$linubot_systemd" = 1 ]; then
+      if [ "$linubot_was_enabled" = 0 ]; then systemctl --user disable linubot.service; fi
+      systemctl --user daemon-reload
+    fi
+    if [ -n "$linubot_previous" ]; then
+      if [ "$linubot_systemd" = 1 ] && [ -f "$HOME/.config/systemd/user/linubot.service" ]; then
+        systemctl --user reset-failed linubot
+        systemctl --user restart linubot || echo 'Previous version selected; service recovery failed. Retry starting Linubot after fixing the user manager.' >&2
+      else
+        # The prior desktop may still own its single-instance lock. A secondary
+        # invocation only shows it; after an in-app exit this starts the old app.
+        nohup env -u ELECTRON_RUN_AS_NODE "$linubot_previous/linubot" >/dev/null 2>&1 </dev/null 9>&- &
+      fi
+    fi
+  fi
+  rm -rf -- "$linubot_tmp"
+  exit "$linubot_status"
+}
+trap cleanup EXIT
 if [ -z "$linubot_version" ]; then
   download https://api.github.com/repos/agent-sh/linubot/releases/latest "$linubot_tmp/release.json"
   linubot_version=$(sed -nE 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v([0-9]+\.[0-9]+\.[0-9]+)".*/\1/p' "$linubot_tmp/release.json" | head -n 1)
@@ -99,19 +144,72 @@ fi
 [ -f "$linubot_target/.linubot-managed" ] && [ ! -L "$linubot_target" ] && [ -x "$linubot_target/linubot" ] || { echo 'The staged version is missing.' >&2; exit 1; }
 if [ "$linubot_stage" = 1 ]; then echo "Staged Linubot $linubot_version."; exit 0; fi
 
+# Snapshot only integration files this installer owns, before replacing anything.
+linubot_integration=("$HOME/.local/bin/linubot" "$HOME/.local/bin/linubot-start" "$HOME/.local/share/applications/linubot.desktop" "$HOME/.local/share/icons/hicolor/512x512/apps/linubot.png" "$HOME/.config/systemd/user/linubot.service")
+for linubot_index in "${!linubot_integration[@]}"; do
+  linubot_file="${linubot_integration[$linubot_index]}"
+  if [ -e "$linubot_file" ] || [ -L "$linubot_file" ]; then cp -a -- "$linubot_file" "$linubot_tmp/integration-$linubot_index"; fi
+done
+if command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
+  linubot_systemd=1
+  if systemctl --user is-enabled --quiet linubot.service; then linubot_was_enabled=1; fi
+fi
+if [ -L "$linubot_root/linubot" ]; then
+  linubot_previous=$(readlink -f "$linubot_root/linubot")
+  [ -x "$linubot_previous/linubot" ] && [ -f "$linubot_previous/.linubot-managed" ] || { echo 'Refusing to replace an unmanaged active symlink.' >&2; exit 1; }
+fi
 # Keep the prior version for rollback and leave the running process's files intact.
 if [ -e "$linubot_root/linubot" ] && [ ! -L "$linubot_root/linubot" ]; then
   [ -x "$linubot_root/linubot/linubot" ] && [ -f "$linubot_root/linubot/resources/app.asar" ] || { echo 'The existing linubot directory is not an application installation.' >&2; exit 1; }
-  mv "$linubot_root/linubot" "$linubot_root/linubot-before-$(date +%s)"
+  linubot_previous="$linubot_root/linubot-before-$(date +%s)"
+  mv "$linubot_root/linubot" "$linubot_previous"
 fi
+linubot_transaction=1
 ln -s "$linubot_target" "$linubot_root/.linubot-next-$$"
 mv -Tf "$linubot_root/.linubot-next-$$" "$linubot_root/linubot"
 mkdir -p "$HOME/.local/bin" "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/512x512/apps"
 printf '#!/usr/bin/env bash\nexec %q "$@"\n' "$linubot_root/linubot/linubot" > "$HOME/.local/bin/linubot"
 chmod 755 "$HOME/.local/bin/linubot"
+if [ "$linubot_systemd" = 1 ]; then
+  mkdir -p "$HOME/.config/systemd/user"
+  cat > "$HOME/.config/systemd/user/linubot.service" <<'UNIT'
+[Unit]
+Description=Linubot
+PartOf=graphical-session.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+ExecStart=%h/.local/bin/linubot
+Restart=on-failure
+RestartSec=5
+KillMode=process
+UnsetEnvironment=ELECTRON_RUN_AS_NODE
+
+[Install]
+WantedBy=graphical-session.target
+UNIT
+  systemctl --user daemon-reload
+  systemctl --user enable linubot.service
+  for linubot_env in DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_SESSION_TYPE; do
+    if [ "${!linubot_env+x}" ]; then systemctl --user import-environment "$linubot_env"; fi
+  done
+fi
+# Keep ExecStart as the plain launcher to avoid recursive service starts.
+cat > "$HOME/.local/bin/linubot-start" <<'LAUNCHER'
+#!/usr/bin/env bash
+set -euo pipefail
+unset ELECTRON_RUN_AS_NODE
+if command -v systemctl >/dev/null && systemctl --user show-environment >/dev/null 2>&1; then
+  systemctl --user start linubot
+  exec "$HOME/.local/bin/linubot" --linubot-show
+fi
+exec "$HOME/.local/bin/linubot" "$@"
+LAUNCHER
+chmod 755 "$HOME/.local/bin/linubot-start"
 cp "$linubot_target/linubot.png" "$HOME/.local/share/icons/hicolor/512x512/apps/linubot.png"
 # Desktop entry Exec fields escape backslashes, quotes, backticks and dollar signs.
-linubot_launcher="$HOME/.local/bin/linubot"
+linubot_launcher="$HOME/.local/bin/linubot-start"
 linubot_launcher=${linubot_launcher//\\/\\\\}
 linubot_launcher=${linubot_launcher//\"/\\\"}
 linubot_launcher=${linubot_launcher//\$/\\\$}
@@ -123,7 +221,18 @@ printf '[Desktop Entry]\nName=Linubot\nComment=Your local AI team\nExec="%s"\nIc
 if command -v gtk-update-icon-cache >/dev/null; then gtk-update-icon-cache --force --ignore-theme-index "$HOME/.local/share/icons/hicolor" >/dev/null 2>&1 || true; fi
 if command -v update-desktop-database >/dev/null; then update-desktop-database "$HOME/.local/share/applications" >/dev/null 2>&1 || true; fi
 echo "Installed Linubot $linubot_version. Open Linubot from your applications menu."
-# Do not let the launched app inherit the installation lock for its whole lifetime.
+# Keep the transaction locked through restart/rollback. Systemd does not inherit
+# this descriptor; direct launches explicitly close it in the child.
+if [ "$linubot_relaunch" = 1 ] || [ "$linubot_activate" = 1 ]; then
+  if [ "$linubot_systemd" = 1 ]; then
+    if systemctl --user is-active --quiet linubot-desktop; then systemctl --user stop linubot-desktop; fi
+    linubot_restart_attempted=1
+    systemctl --user restart linubot
+  else
+    nohup env -u ELECTRON_RUN_AS_NODE "$HOME/.local/bin/linubot" >/dev/null 2>&1 </dev/null 9>&- &
+  fi
+fi
+
+linubot_transaction=0
 flock -u 9
 exec 9>&-
-if [ "$linubot_relaunch" = 1 ]; then nohup "$HOME/.local/bin/linubot" >/dev/null 2>&1 </dev/null & fi

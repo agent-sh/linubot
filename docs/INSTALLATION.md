@@ -38,8 +38,49 @@ are retained, and application data stays in its separate location.
 
 The application-menu entry points directly to the installed icon. When desktop
 cache utilities are available, the installer refreshes icon and application
-listings too. It releases the installation lock before `--launch` starts
-Linubot, so the running app does not keep that lock and block later upgrades.
+listings too. It releases the installation lock before launching Linubot, so the running app
+does not keep that lock and block later upgrades.
+
+When a user systemd manager is available, installation writes and enables
+`~/.config/systemd/user/linubot.service` for `graphical-session.target`.
+The application-menu entry starts the unit, then sends a single-instance show
+request so a hidden background window reappears without replacing the supervised
+process. The show request exits if no instance owns the lock; it cannot become
+an unsupervised primary. `--launch`
+and `--activate-only` use `systemctl --user restart linubot`. Without a user
+systemd manager, they use the plain `~/.local/bin/linubot` launcher.
+If integration, enabling or activation fails, the installer restores the prior
+active version and its launcher, menu, icon and service files, and attempts to
+restart it. The candidate remains staged. A failed recovery start is logged and
+leaves the old version selected for manual retry. Later runtime crashes are
+handled by systemd restart policy, not automatic version rollback.
+
+The service clears `ELECTRON_RUN_AS_NODE`, restarts after failures with a
+five-second delay, and limits starts to three in five minutes. A normal quit
+does not restart the app. During activation, an active legacy transient unit
+named `linubot-desktop` is stopped before the new unit starts.
+
+Inspect failures with `journalctl --user -u linubot.service`. After resolving a
+repeated startup failure, use `systemctl --user reset-failed linubot` before
+starting it again. `KillMode=process` lets an update helper survive app shutdown.
+
+Releasing and installing are separate operations. To stage a version without
+changing the active symlink, desktop entry, service or running app:
+
+```sh
+bash install.sh --version 2.11.0 --stage-only
+```
+
+After finishing active work, explicitly activate the staged version and restart:
+
+```sh
+bash install.sh --version 2.11.0 --activate-only
+```
+
+Use a fresh installer for these commands. `--stage-only` also remains harmless
+when that version is already staged. The in-app updater waits for its old
+process to exit before activation. For a manually launched, unsupervised app,
+quit it before running `--activate-only` so its single-instance lock is released.
 
 To pin a release instead of selecting the latest:
 
