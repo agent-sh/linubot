@@ -32,6 +32,9 @@ export const providerPresets: { id: string; name: string; kind: ProviderKind; ba
 ];
 
 export interface CatalogModel { id: string; name: string }
+export function preselectCatalogModel(models: Pick<CatalogModel, "id">[]): string {
+  return models.find((model) => !/embed|rerank/i.test(model.id))?.id || "";
+}
 export async function listProviderModels(config: ProviderConfig, parentSignal?: AbortSignal, request: typeof fetch = fetch) {
   const base = providerBase(config.kind, config.baseUrl);
   if (config.kind === "openai-codex") { if (base !== CODEX_BASE) throw new InputError("Invalid ChatGPT endpoint"); return codexModels(parentSignal); }

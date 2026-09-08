@@ -23,6 +23,7 @@ import { museStatus } from "./auth/muse.ts";
 import type { ProviderPatch } from "./auth/store.ts";
 import { listProviderModels, providerPresets } from "./auth/catalog.ts";
 import { createOpenRouterLogin } from "./auth/openrouter.ts";
+import { createTiyuvtaLogin } from "./auth/tiyuvta.ts";
 import { createAgentImports } from "./imports/manager.ts";
 import type { ImportRoots } from "./imports/sources.ts";
 import { contextSettings, setContextSettings, contextStatus } from "./context/manager.ts";
@@ -93,7 +94,7 @@ function body(req: IncomingMessage): Promise<Record<string, unknown>> {
   });
 }
 
-export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { scheduler?: boolean; accessToken?: string; webRoot?: string; onProviderConnected?: (id: string) => void; openRouterRequest?: typeof fetch; importRoots?: ImportRoots; updates?: Updates; phonePort?: number; chooseImportFolder?: () => Promise<string | undefined> } = {}) {
+export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { scheduler?: boolean; accessToken?: string; webRoot?: string; onProviderConnected?: (id: string) => void; openRouterRequest?: typeof fetch; tiyuvtaRequest?: typeof fetch; importRoots?: ImportRoots; updates?: Updates; phonePort?: number; chooseImportFolder?: () => Promise<string | undefined> } = {}) {
   const updates = options.updates ?? createUpdates();
   ensureMemoryFiles();
   const computer = options.computer ?? createComputer();
@@ -101,6 +102,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
   const workspaceView = options.workspaceView ?? createWorkspaceView(computer);
   const runtime = createAgentRuntime({ ...options, computer, mcp, workspaceView });
   const openRouter = createOpenRouterLogin({ request: options.openRouterRequest, connected: options.onProviderConnected });
+  const tiyuvta = createTiyuvtaLogin({ request: options.tiyuvtaRequest, connected: options.onProviderConnected });
   function oauthConnection(kind: "openai-codex" | "google-oauth", id?: string, model = "") {
     const baseUrl = kind === "openai-codex" ? CODEX_BASE : GOOGLE_BASE;
     const existing = id ? getProvider(id) : undefined;
@@ -521,6 +523,11 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
         if (r[2] === "status" && method === "GET") { ok(openRouter.status(requiredText(url.searchParams.get("id"), "Sign-in", 100))); return; }
         if (r[2] === "cancel" && method === "POST") { await openRouter.cancel(requiredText(b.id, "Sign-in", 100)); ok({ cancelled: true }); return; }
       }
+      if (r[0] === "oauth" && r[1] === "tiyuvta") {
+        if (r[2] === "start" && method === "POST") { ok(await tiyuvta.begin(optionalText(b.id, "Connection", 80))); return; }
+        if (r[2] === "status" && method === "GET") { ok(tiyuvta.status(requiredText(url.searchParams.get("id"), "Sign-in", 100))); return; }
+        if (r[2] === "cancel" && method === "POST") { await tiyuvta.cancel(requiredText(b.id, "Sign-in", 100)); ok({ cancelled: true }); return; }
+      }
       if (r[0] === "updates") {
         if (r.length === 1 && method === "GET") { ok(await updates.check()); return; }
         if (r[1] === "check" && method === "POST") { ok(await updates.check(true)); return; }
@@ -632,6 +639,7 @@ export function createApp(options: Parameters<typeof createAgentRuntime>[0] & { 
     workspaceView.close();
     await runtime.close();
     await openRouter.close();
+    await tiyuvta.close();
     await codex.close();
     await google.close();
     await mcp.close();

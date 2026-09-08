@@ -37,7 +37,7 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
       const draft = route.request().postDataJSON(); catalogRequests.push(draft);
       if (draft?.baseUrl === 'https://api.tiyuvta.ai/v1') {
         if (failTiyuvtaCatalog) await route.fulfill({ status: 502, json: { error: 'Fixture catalog unavailable.' } });
-        else await route.fulfill({ json: { models: [{ id: 'tiyuvta-fixture-a', name: 'Tiyuvta fixture A' }, { id: 'tiyuvta-fixture-b', name: 'Tiyuvta fixture B' }], supported: true, truncated: false } });
+        else await route.fulfill({ json: { models: [{ id: 'a-embedding', name: 'Embedding' }, { id: 'b-RERANKER', name: 'Reranker' }, { id: 'tiyuvta-fixture-a', name: 'Tiyuvta fixture A' }, { id: 'tiyuvta-fixture-b', name: 'Tiyuvta fixture B' }], supported: true, truncated: false } });
       } else if (nonPublicPresets.some(([, baseUrl]) => baseUrl === draft?.baseUrl)) await route.fulfill({ status: 502, json: { error: 'Unexpected non-public catalog request.' } });
       else await route.continue();
     });
@@ -58,7 +58,12 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     await page.getByRole('button', { name: 'Test connection', exact: true }).click();
     await expect(page.locator('[data-test-output]')).toContainText('fixture-b: Connected.');
 
-    await featured.getByRole('button', { name: 'Connect Tiyuvta', exact: true }).click();
+    await expect(featured.getByRole('button', { name: 'Connect in browser', exact: true })).toBeVisible();
+    await expect(featured.getByRole('link', { name: 'Get an API key', exact: true })).toBeVisible();
+    await featured.getByRole('button', { name: 'Paste a key instead', exact: true }).click();
+    await expect(page.locator('input[name=apiKey]')).toBeFocused();
+    await expect(page.getByRole('heading', { name: 'Connect OpenRouter', exact: true })).toBeHidden();
+    await expect(page.getByRole('heading', { name: 'Connect Muse Code', exact: true })).toBeHidden();
     await expect(page.locator('input[name=baseUrl]')).toHaveValue('https://api.tiyuvta.ai/v1');
     await expect(page.locator('input[name=name]')).toHaveValue('Tiyuvta');
     await expect(page.locator('select[name=kind]')).toHaveValue('openai-compat');
@@ -66,15 +71,41 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     await expect(picker.locator('option[value="tiyuvta-fixture-a"]')).toHaveText('Tiyuvta fixture A · tiyuvta-fixture-a');
     await expect(picker.locator('option[value="tiyuvta-fixture-b"]')).toHaveText('Tiyuvta fixture B · tiyuvta-fixture-b');
     await expect(page.locator('input[name=apiKey]')).toHaveValue('');
+    await expect(picker).toHaveValue('tiyuvta-fixture-a');
+    await expect(page.locator('[data-model-preselected]')).toHaveText('Preselected from the Tiyuvta catalog. Change it any time.');
+    await expect(page.locator('[data-model-preselected]')).toBeVisible();
+    await page.locator('input[name=apiKey]').fill('manual-fixture-key');
+    await expect(picker).toHaveValue('tiyuvta-fixture-a');
+    await expect(page.locator('[data-model-preselected]')).toBeVisible();
+    await picker.selectOption('tiyuvta-fixture-b');
+    await expect(page.locator('[data-model-preselected]')).toBeHidden();
+    await page.getByRole('button', { name: 'Refresh models', exact: true }).click();
+    await expect(page.locator('[data-model-status]')).toHaveText('4 models from this endpoint.');
+    await expect(picker).toHaveValue('tiyuvta-fixture-b');
     const tiyuvtaRequests = catalogRequests.filter((draft) => draft?.baseUrl === 'https://api.tiyuvta.ai/v1');
-    expect(tiyuvtaRequests).toHaveLength(1);
+    expect(tiyuvtaRequests).toHaveLength(2);
     expect(tiyuvtaRequests[0].apiKey).toBeUndefined();
+    await featured.getByRole('button', { name: 'Connect in browser', exact: true }).click();
+    await expect.poll(() => app.evaluate(() => globalThis.providerSignInUrl || '')).toContain('https://inference.tiyuvta.ai/app/connect?');
+    const tiyuvtaUrl = new URL(await app.evaluate(() => globalThis.providerSignInUrl));
+    expect(tiyuvtaUrl.searchParams.get('app')).toBe('linubot');
+    expect(tiyuvtaUrl.searchParams.get('state')).toBeTruthy();
+    expect(tiyuvtaUrl.searchParams.get('code_challenge_method')).toBe('S256');
+    const tiyuvtaCallback = new URL(tiyuvtaUrl.searchParams.get('callback_url'));
+    expect(tiyuvtaCallback.hostname).toBe('127.0.0.1');
+    expect(tiyuvtaCallback.pathname).toBe('/callback');
+    await expect(featured.getByRole('link', { name: 'Open sign-in again', exact: true })).toHaveAttribute('href', tiyuvtaUrl.href);
+    await featured.getByRole('button', { name: 'Cancel sign-in', exact: true }).click();
+    await expect(featured.locator('[data-feedback]')).toHaveText('Sign-in cancelled.');
+    await expect(featured.getByRole('link', { name: 'Open sign-in again', exact: true })).toHaveCount(0);
     failTiyuvtaCatalog = true;
     await page.getByRole('button', { name: 'Add connection', exact: true }).click();
     await expect(page.locator('select[name=preset]')).toHaveValue('tiyuvta');
     await expect(page.locator('input[name=baseUrl]')).toHaveValue('https://api.tiyuvta.ai/v1');
     await expect(page.locator('input[name=name]')).toHaveValue('Tiyuvta');
     await expect(page.locator('[data-model-status]')).toContainText('Fixture catalog unavailable. Custom model IDs are available.');
+    await expect(picker).toHaveValue('');
+    await expect(page.locator('[data-model-preselected]')).toBeHidden();
     for (const [preset, baseUrl] of nonPublicPresets) {
       await page.locator('select[name=preset]').selectOption(preset);
       await expect(page.locator('input[name=baseUrl]')).toHaveValue(baseUrl);
@@ -120,7 +151,7 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
 
     await page.evaluate(() => { location.hash = '#/settings/provider'; });
     await page.locator('select[name=preset]').selectOption('openrouter');
-    await page.getByRole('button', { name: 'Connect in browser', exact: true }).click();
+    await page.locator('.browser-connect').getByRole('button', { name: 'Connect in browser', exact: true }).click();
     await expect.poll(() => app.evaluate(() => globalThis.providerSignInUrl || '')).toContain('https://openrouter.ai/auth?');
     const authUrl = new URL(await app.evaluate(() => globalThis.providerSignInUrl));
     expect(authUrl.searchParams.get('code_challenge_method')).toBe('S256');
@@ -201,6 +232,28 @@ test('connection catalogs, per-bot choices, and browser sign-in work in the desk
     await page.getByRole('button', { name: 'Upgrade to 2.7.0', exact: true }).click();
     await expect.poll(() => app.evaluate(() => globalThis.providerSignInUrl || '')).toContain('/linubot/releases/tag/v2.7.0');
     await page.screenshot({ path: join(directory, 'update-available.png'), fullPage: true });
+    // Exercise real failed callback polling, then a connected status fixture.
+    await featured.getByRole('button', { name: 'Connect in browser', exact: true }).click();
+    await expect(featured.getByRole('link', { name: 'Open sign-in again', exact: true })).toBeVisible();
+    const deniedUrl = new URL(await app.evaluate(() => globalThis.providerSignInUrl));
+    const deniedCallback = new URL(deniedUrl.searchParams.get('callback_url'));
+    deniedCallback.searchParams.set('state', deniedUrl.searchParams.get('state'));
+    deniedCallback.searchParams.set('error', 'access_denied');
+    expect((await fetch(deniedCallback)).status).toBe(400);
+    await expect(featured.locator('[data-feedback]')).toHaveText('Sign-in was declined or did not return a code.');
+    await expect(featured.getByRole('button', { name: 'Cancel sign-in', exact: true })).toBeHidden();
+    const connectedId = await page.evaluate(async () => {
+      const response = await fetch('/api/provider', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ newConnection: true, name: 'Tiyuvta', kind: 'openai-compat', baseUrl: 'https://api.tiyuvta.ai/v1', auth: 'bearer', apiKey: 'browser-fixture-key', model: 'tiyuvta-fixture-a' }) });
+      if (!response.ok) throw new Error('Could not create fixture connection');
+      return (await response.json()).id;
+    });
+    await page.route('**/api/oauth/tiyuvta/status*', (route) => route.fulfill({ json: { state: 'connected', connectionId: connectedId } }));
+    await featured.getByRole('button', { name: 'Connect in browser', exact: true }).click();
+    await expect(featured.locator('[data-feedback]')).toHaveText('Connected to Tiyuvta. You can change the model below.');
+    await expect(page.locator('[data-connection]')).toHaveValue(connectedId);
+    await expect(picker).toHaveValue('tiyuvta-fixture-a');
+    await expect(page.locator('[data-default-model]')).toHaveText('fixture-b');
+    await expect(featured.getByRole('link', { name: 'Open sign-in again', exact: true })).toHaveCount(0);
     expect(catalogRequests.filter((draft) => nonPublicPresets.some(([, baseUrl]) => baseUrl === draft?.baseUrl))).toHaveLength(0);
     expect(errors).toEqual([]);
   } finally {
