@@ -13,7 +13,7 @@ export const PROVIDER_KINDS: ProviderKind[] = ["openai-compat", "responses", "an
 export interface ProviderConfig { kind: ProviderKind; baseUrl: string; apiKey: string; model: string; auth?: ProviderAuth; id?: string; name?: string; accountIdentity?: string; quotaProject?: string }
 export interface ToolCall { id: string; name: string; arguments: string }
 export interface ToolDefinition { name: string; description: string; parameters: Record<string, unknown> }
-export interface ProviderItems { identity: string; items: unknown[]; tokens: number; compacted?: boolean; format?: "responses" | "chat" | "anthropic" }
+export interface ProviderItems { identity: string; items: unknown[]; tokens: number; compacted?: boolean; format?: "responses" | "chat" | "anthropic" | "converse" }
 export interface ChatMessage { role: string; content: string; toolCalls?: ToolCall[]; toolCallId?: string; images?: { mimeType: "image/png" | "image/jpeg"; data: string }[]; providerItems?: ProviderItems; archiveSeq?: number; observation?: boolean; pinned?: boolean }
 export interface ChatResponse {
   text: string;
@@ -28,6 +28,26 @@ export type FetchFn = (url: string, init: {
 }) => Promise<{ ok: boolean; status: number; json(): Promise<unknown> }>;
 
 const MAX_BYTES = 2 * 1024 * 1024;
+/* Claude output cap. Thinking is always on for Opus 5.5 / Fable 5.1 and counts toward max_tokens, so
+ * a 4K cap cut replies off. 128K is the Opus 5.5 / Fable 5.1 / Sonnet 5 ceiling. Other models on the
+ * Anthropic or Converse wire (GLM via z.ai, Nova, Llama) keep 4096, since their limits differ. */
+export const CLAUDE_MAX_OUTPUT_TOKENS = 128_000;
+const DEFAULT_MAX_OUTPUT_TOKENS = 4096;
+export const isClaudeModel = (model: string): boolean => /(^|[./:])claude-/i.test(model);
+const defaultOutputTokens = (model: string): number => isClaudeModel(model) ? CLAUDE_MAX_OUTPUT_TOKENS : DEFAULT_MAX_OUTPUT_TOKENS;
+/* A safety-classifier decline: HTTP 200 with stop_reason "refusal" (Converse: stopReason "refusal"). */
+export class ProviderRefusalError extends Error {
+  readonly category: string;
+  constructor(category: string) {
+    super(`The model declined this request (${category === "unknown" ? "safety classifier" : `${category} safety classifier`}). Rephrase the request or switch to another model.`);
+    this.name = "ProviderRefusalError";
+    this.category = category;
+  }
+}
+function refusalCategory(details: unknown): string {
+  const category = details && typeof details === "object" ? (details as Record<string, unknown>).category : undefined;
+  return typeof category === "string" && /^[a-z_]{1,40}$/.test(category) ? category : "unknown";
+}
 export async function readProviderJson(response: Response, maxBytes = MAX_BYTES): Promise<unknown> {
   if (Number(response.headers.get("content-length")) > maxBytes) { await response.body?.cancel(); throw new Error("Provider response is too large"); }
   const reader = response.body?.getReader();
@@ -133,7 +153,7 @@ export async function authenticatedProvider(cfg: ProviderConfig, signal?: AbortS
 export function validateProviderItems(cfg: ProviderConfig, messages: ChatMessage[]) {
   for (const message of messages) if (message.providerItems) {
     const format = message.providerItems.format || "responses";
-    const compatible = format === "responses" ? ["responses", "xai-oauth", "openai-codex"].includes(cfg.kind) : format === "chat" ? ["openai-compat", "google-oauth"].includes(cfg.kind) : cfg.kind === "anthropic";
+    const compatible = format === "responses" ? ["responses", "xai-oauth", "openai-codex"].includes(cfg.kind) : format === "chat" ? ["openai-compat", "google-oauth"].includes(cfg.kind) : format === "converse" ? cfg.kind === "converse" : cfg.kind === "anthropic";
     if (!compatible || message.providerItems.identity !== providerIdentity(cfg)) throw new InputError("Provider context belongs to another connection, account or model. Rebuild from the session archive.", 409);
     if (!Array.isArray(message.providerItems.items) || message.providerItems.items.some((item) => !item || typeof item !== "object" || (Object.hasOwn(item, "role") && !["user", "assistant", "tool"].includes(String((item as Record<string, unknown>).role))))) throw new InputError("Provider context cannot introduce system or developer instructions");
   }
@@ -205,7 +225,9 @@ function wireMessages(messages: ChatMessage[], kind: ProviderKind): unknown[] {
   for (const message of messages.filter((item) => item.role !== "system")) {
     const role = message.role === "assistant" ? "assistant" : "user";
     const content: unknown[] = [];
-    if (kind === "anthropic" && message.providerItems?.format === "anthropic") {
+    // Replay a native assistant turn verbatim: Claude needs its thinking blocks (Anthropic) or
+    // signed reasoningContent blocks (Converse) back unmodified, in order, in a tool loop.
+    if ((kind === "anthropic" && message.providerItems?.format === "anthropic") || (kind === "converse" && message.providerItems?.format === "converse")) {
       if (output.at(-1)?.role === role) output.at(-1)!.content.push(...message.providerItems.items);
       else output.push({ role, content: message.providerItems.items });
       continue;
@@ -267,12 +289,12 @@ export async function chatResponse(
     if (cfg.kind === "openai-codex") { delete payload.max_output_tokens; payload.stream = true; payload.tools ??= []; payload.tool_choice = "auto"; payload.parallel_tool_calls = true; payload.include = ["reasoning.encrypted_content"]; }
   } else if (cfg.kind === "anthropic") {
     url = `${base}/messages`;
-    payload = { model: cfg.model, system, messages: rest, max_tokens: options.maxOutputTokens ?? 4096,
+    payload = { model: cfg.model, system, messages: rest, max_tokens: options.maxOutputTokens ?? defaultOutputTokens(cfg.model),
       ...(tools.length ? { tools: tools.map((tool) => ({ name: tool.name, description: tool.description, input_schema: tool.parameters })) } : {}),
     };
   } else if (cfg.kind === "converse") {
     url = `${base}/model/${encodeURIComponent(cfg.model)}/converse`;
-    payload = { system: system ? [{ text: system }] : [], messages: rest, inferenceConfig: { maxTokens: options.maxOutputTokens ?? 4096 },
+    payload = { system: system ? [{ text: system }] : [], messages: rest, inferenceConfig: { maxTokens: options.maxOutputTokens ?? defaultOutputTokens(cfg.model) },
       ...(tools.length ? { toolConfig: { tools: tools.map((tool) => ({ toolSpec: { name: tool.name, description: tool.description, inputSchema: { json: tool.parameters } } })) } } : {}),
     };
   } else {
@@ -319,12 +341,14 @@ export async function chatResponse(
         result.providerItems = { identity: providerIdentity(cfg), items: output, tokens: Number.isSafeInteger(outputTokens) && Number(outputTokens) >= 0 ? Number(outputTokens) : Math.ceil(JSON.stringify(output.filter((item) => item.type !== "reasoning")).length / 3) };
       }
     } else if (cfg.kind === "anthropic") {
+      if (data.stop_reason === "refusal") throw new ProviderRefusalError(refusalCategory(data.stop_details));
       const content = blocks(data.content);
       result.text = content.map((block) => typeof block.text === "string" ? block.text : "").join("");
       result.toolCalls = content.filter((block) => block.type === "tool_use").map((block) => toolCall(block.id, block.name, block.input));
       result.finishReason = typeof data.stop_reason === "string" ? data.stop_reason : undefined;
       if (result.toolCalls.length && content.some((block) => ["thinking", "redacted_thinking"].includes(String(block.type)))) result.providerItems = { identity: providerIdentity(cfg), format: "anthropic", items: content, tokens: Number.isSafeInteger(usage?.output_tokens) && Number(usage?.output_tokens) >= 0 ? Number(usage?.output_tokens) : Math.ceil(JSON.stringify(content).length / 3) };
     } else if (cfg.kind === "converse") {
+      if (data.stopReason === "refusal") throw new ProviderRefusalError(refusalCategory(object(data.additionalModelResponseFields ?? {}).stop_details));
       const content = blocks(object(object(data.output).message).content);
       result.text = content.map((block) => typeof block.text === "string" ? block.text : "").join("");
       result.toolCalls = content.filter((block) => block.toolUse).map((block) => {
@@ -332,6 +356,7 @@ export async function chatResponse(
         return toolCall(call.toolUseId, call.name, call.input);
       });
       result.finishReason = typeof data.stopReason === "string" ? data.stopReason : undefined;
+      if (result.toolCalls.length && content.some((block) => block.reasoningContent)) result.providerItems = { identity: providerIdentity(cfg), format: "converse", items: content, tokens: Number.isSafeInteger(usage?.outputTokens) && Number(usage?.outputTokens) >= 0 ? Number(usage?.outputTokens) : Math.ceil(JSON.stringify(content).length / 3) };
     } else {
       const choice = blocks(data.choices)[0];
       if (!choice) throw new Error("Empty provider response");
