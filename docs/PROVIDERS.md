@@ -19,7 +19,7 @@ depend on your endpoint and account.
 
 | Provider | Connection method |
 | --- | --- |
-| Tiyuvta | Browser sign-in or API key; an editable model is preselected from the public catalog |
+| Tiyuvta (hosted service retired) | The legacy preset remains in the app; choose another provider or a custom endpoint |
 | OpenAI / ChatGPT | Browser sign-in or existing login through the installed Codex CLI |
 | OpenAI API | API key for the standard Responses API |
 | Anthropic | Claude Console API key |
@@ -36,22 +36,13 @@ offers browser sign-in only for the implemented flows below.
 
 ## Tiyuvta
 
-Tiyuvta is Linubot's own hosted inference. OpenAI-compatible, pay per use, new accounts start with free credit.
+Tiyuvta no longer offers hosted inference. The legacy preset and browser sign-in
+controls remain in Linubot, but they do not provide a working hosted connection.
+Choose another provider or configure your own compatible endpoint.
 
-Choose **Connect in browser** on the Tiyuvta card in provider settings. Finish
-signing in and approve the connection, then return to Linubot. The app saves the
-key and preselects the first catalog model whose ID contains neither `embed` nor
-`rerank` (case insensitive). The model stays editable. If no other connection is
-ready, this becomes the app default. If the catalog is unavailable, choose a
-model or enter its ID and save the connection.
-
-For manual setup, choose **Paste a key instead**. The preset fills
-`https://api.tiyuvta.ai/v1`, loads its public catalog and preselects an editable
-model before a key is entered.
-[Get an API key](https://inference.tiyuvta.ai/login?next=/app/keys), paste it into
-Linubot and save the connection. See the
-[quickstart](https://inference.tiyuvta.ai/quickstart) for setup help.
-Other providers remain available in the provider selector.
+[Tiyuvta](https://tiyuvta.ai/services/) helps companies with model choice,
+deployment and optimization, and fine-tuning on their hardware or cloud account.
+Connect a deployed model through Linubot's local or custom endpoint settings.
 
 ## OpenAI / ChatGPT through Codex
 
