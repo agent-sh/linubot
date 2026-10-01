@@ -75,8 +75,10 @@ Converse endpoints are supported, including custom and local servers. Prepared
 providers and available browser sign-in methods are listed in the
 [provider guide](docs/PROVIDERS.md). API compatibility alone does not imply
 access through a provider's consumer subscription.
-[Tiyuvta](https://inference.tiyuvta.ai/) is the recommended first connection,
-with browser sign-in and an editable preselected model.
+
+Running open models for your company? [Tiyuvta](https://tiyuvta.ai/services/)
+helps with model choice, deployment and optimization, and fine-tuning on your
+hardware or cloud account.
 
 Settings contains provider connections, web search, connected tools and long
 conversation budgets. A bot's options select its connection, model and skills.
